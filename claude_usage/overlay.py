@@ -76,6 +76,10 @@ STRIP_RING_FRACTION = 0.70      # ring diameter as a fraction of strip height
 STRIP_STROKE_FRACTION = 0.12    # ring stroke as a fraction of ring diameter
 STRIP_RADIUS_FRACTION = 0.25    # corner radius: a rounded rect, NOT a capsule
 STRIP_MIN_TEXT_PX = 9           # never draw a percentage smaller than this
+# Fixed chrome: the two handles do not scale with the strip.
+STRIP_EDGE = 8.0                # inset from the strip's edge to a handle
+STRIP_DOT_R = 1.35              # handle dot radius
+STRIP_DOT_STEP = 4.0            # handle dot pitch
 # Screen-anchor presets the OSD can snap to. "custom" means use the exact
 # osd_x / osd_y coordinates from config (set when the user drags the widget).
 OSD_POSITION_TOP_LEFT = "top-left"
@@ -529,17 +533,18 @@ class UsageOverlay(QWidget):
         from PySide6.QtGui import QFontMetrics
         s = self._scale
         h = STRIP_HEIGHT * s
-        pad = h * 0.22
         ring_d = h * STRIP_RING_FRACTION
         stroke = max(2.0, ring_d * STRIP_STROKE_FRACTION)
-        # Left end: the move handle (dot grid). Right end: the scale grip,
-        # its mirror -- same size and weight, different glyph -- because
-        # scroll-to-scale over a 30 px bar has no good place to aim at.
-        handle_x = pad
-        handle_w = h * 0.22
-        # Grip is a square as tall as the dot grid's span (rows at +-0.135h
-        # plus dot radius 0.045h = 0.36h), so the two ends read as mirrors.
-        grip_w = h * 0.36
+        # Handles are chrome, not content: they keep a FIXED size at every
+        # scale, and only the dials grow. Move handle (2x3 dots) on the left
+        # edge, centred; scale grip (triangular dots) in the bottom-right
+        # corner, like a window's resize grip.
+        edge = STRIP_EDGE
+        dot, step = STRIP_DOT_R, STRIP_DOT_STEP
+        handle_x = edge
+        handle_w = step + 2 * dot            # two dot columns
+        grip_w = 2 * step + 2 * dot          # 3x3 lattice
+        pad = edge
 
         in_px = max(STRIP_MIN_TEXT_PX, ring_d * 0.28)
         out_px = max(STRIP_MIN_TEXT_PX, h * 0.33)
@@ -564,11 +569,12 @@ class UsageOverlay(QWidget):
         # drop the trailing inter-dial gap, add the right pad
         if dials:
             x -= (h * 0.30 if inside else h * 0.35)
-        grip_x = x + h * 0.28
-        width = int(round(grip_x + grip_w + pad * 0.6))
+        grip_x = x + h * 0.20
+        width = int(round(grip_x + grip_w + edge))
         return {"h": h, "pad": pad, "ring_d": ring_d, "stroke": stroke,
                 "handle_x": handle_x, "dials": dials, "width": width,
-                "grip": QRectF(grip_x, (h - grip_w) / 2, grip_w, grip_w)}
+                "dot": dot, "step": step,
+                "grip": QRectF(grip_x, h - edge * 0.6 - grip_w, grip_w, grip_w)}
 
     def _strip_width(self) -> int:
         return self._strip_layout()["width"]
@@ -1103,12 +1109,11 @@ class UsageOverlay(QWidget):
         p.setBrush(_hex_to_qcolor(t["card"], self._opacity))
         p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), radius, radius)
 
-        # Drag handle: 2x3 dot grid, scaled with the strip.
+        # Move handle: 2x3 dot grid, fixed size, centred on the left edge.
         p.setPen(Qt.NoPen)
         p.setBrush(_hex_to_qcolor(t["text_dim"]))
-        dot = max(1.0, L["h"] * 0.045)
+        dot, step = L["dot"], L["step"]
         hx = L["handle_x"] + dot
-        step = L["h"] * 0.135
         for col in (0, 1):
             for row in (-1, 0, 1):
                 p.drawEllipse(QPointF(hx + col * step, cy + row * step), dot, dot)
@@ -1120,8 +1125,8 @@ class UsageOverlay(QWidget):
         g = L["grip"]
         p.setPen(Qt.NoPen)
         p.setBrush(_hex_to_qcolor(t["text_dim"]))
-        ox = g.center().x() - step          # 3x3 lattice centred in the grip
-        oy = g.center().y() - step
+        ox = g.left() + dot                 # 3x3 lattice filling the grip square
+        oy = g.top() + dot
         for r in range(3):
             for c in range(2 - r, 3):
                 p.drawEllipse(QPointF(ox + c * step, oy + r * step), dot, dot)
