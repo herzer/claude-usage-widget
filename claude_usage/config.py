@@ -107,6 +107,10 @@ DEFAULT_CONFIG: Config = {
     # Last model-scoped cap name the API reported (e.g. "Fable 5"), so a cold
     # or rate-limited start can still name it instead of saying "Model cap".
     "last_scoped_label": "",
+    # The AI weekly summary calls /v1/messages with Haiku (max_tokens 320,
+    # cached 1 h). It is the ONLY part of this widget that spends plan quota,
+    # so it must be switchable -- upstream ran it unconditionally.
+    "weekly_report_enabled": True,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"

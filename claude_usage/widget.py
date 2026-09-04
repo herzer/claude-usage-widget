@@ -1714,7 +1714,9 @@ class ClaudeUsageApp(QObject):
         # cache is stale and we're not already generating. Pass a snapshot
         # of the stats so the worker never observes a torn mid-refresh mix
         # of fields.
-        if not stats.weekly_report_text and not self._weekly_report_in_flight:
+        if (self.config.get("weekly_report_enabled", True)
+                and not stats.weekly_report_text
+                and not self._weekly_report_in_flight):
             self._weekly_report_in_flight = True
             threading.Thread(
                 target=self._generate_weekly_report,
