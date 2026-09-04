@@ -533,7 +533,9 @@ class UsageOverlay(QWidget):
         out_px = max(STRIP_MIN_TEXT_PX, h * 0.33)
         f_in, f_out = _strip_font(in_px), _strip_font(out_px)
         fm_in, fm_out = QFontMetrics(f_in, self), QFontMetrics(f_out, self)
-        inside = fm_in.horizontalAdvance("100%") + 2 * stroke + h * 0.12 <= ring_d
+        # Fits when the widest value clears the INNER diameter with a hair of
+        # margin. A generous margin here is why it never moved inside at 3x.
+        inside = fm_in.horizontalAdvance("100%") + h * 0.04 <= ring_d - 2 * stroke
 
         dials = []
         x = handle_x + handle_w + h * 0.28
