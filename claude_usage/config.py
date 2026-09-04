@@ -111,6 +111,11 @@ DEFAULT_CONFIG: Config = {
     # cached 1 h). It is the ONLY part of this widget that spends plan quota,
     # so it must be switchable -- upstream ran it unconditionally.
     "weekly_report_enabled": True,
+    # Strip view only, macOS only: raise the window above the menu bar
+    # (NSStatusWindowLevel) and let it be parked IN the bar band. Off by
+    # default because it floats OVER real status items rather than among
+    # them -- it will cover whatever it is dragged onto and does not reflow.
+    "strip_in_menubar": False,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"

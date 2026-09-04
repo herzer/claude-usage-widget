@@ -225,6 +225,11 @@ class UsageOverlay(QWidget):
         # theme: it is meant to read like part of the menu bar, and the panel
         # is where the user chose light or dark.
         self._strip_dark: bool = bool(cfg.get("panel_dark", True))
+        # macOS only: float the strip above the menu bar and allow it to be
+        # parked in the bar band. See DEFAULT_CONFIG for why it is off by
+        # default.
+        self._strip_in_menubar: bool = bool(cfg.get("strip_in_menubar", False))
+        self._menubar_level_warned: bool = False
 
         # Live stats — updated externally via update_stats()
         self._session_pct: float = 0.0
@@ -404,6 +409,89 @@ class UsageOverlay(QWidget):
         if self._view_mode == VIEW_MODE_STRIP:
             self.update()
 
+    # -- strip-in-menu-bar -------------------------------------------------
+    def _strip_in_menubar_active(self) -> bool:
+        return (self._strip_in_menubar and self._view_mode == VIEW_MODE_STRIP
+                and not self._minimized)
+
+    def _anchor_geometry(self, screen):
+        """Where the OSD may live. Normally the screen minus the menu bar;
+        in menu-bar mode, the whole screen, so the bar band is reachable."""
+        return screen.geometry() if self._strip_in_menubar_active() \
+            else screen.availableGeometry()
+
+    def _apply_menubar_level(self) -> None:
+        """Raise the native window above the menu bar, or put it back.
+
+        Qt's WindowStaysOnTopHint maps to NSFloatingWindowLevel (3), which
+        sits BELOW the menu bar (24). Only NSStatusWindowLevel (25) floats
+        over it, and Qt does not expose that -- so it is set on the NSWindow
+        directly via PyObjC. Idempotent, and re-run after anything that
+        recreates the native window (setWindowFlags), because that resets
+        the level to Qt's own.
+        """
+        import sys
+        from PySide6.QtGui import QGuiApplication
+        # Must be the COCOA platform, not merely macOS: the offscreen platform
+        # (tests, preview renders) runs on a Mac too, and its winId() is not
+        # an NSView -- treating it as one segfaults the interpreter.
+        if sys.platform != "darwin" or QGuiApplication.platformName() != "cocoa":
+            return
+        want = self._strip_in_menubar_active()
+        try:
+            import objc
+            from AppKit import (
+                NSFloatingWindowLevel, NSNormalWindowLevel, NSStatusWindowLevel,
+                NSWindowCollectionBehaviorCanJoinAllSpaces,
+                NSWindowCollectionBehaviorMoveToActiveSpace,
+            )
+        except Exception:
+            if want and not self._menubar_level_warned:
+                self._menubar_level_warned = True
+                print("claude-usage: strip_in_menubar needs pyobjc-framework-Cocoa; "
+                      "staying below the menu bar", file=sys.stderr)
+            return
+        try:
+            win = objc.objc_object(c_void_p=int(self.winId())).window()
+            if win is None:
+                return
+            if want:
+                win.setLevel_(NSStatusWindowLevel)
+                # Show on every Space, like the menu bar itself. Qt stamps
+                # MoveToActiveSpace on floating windows, and macOS refuses a
+                # window that has BOTH (NSInternalInconsistencyException), so
+                # clear it first. Kept separate from the level: a behavior
+                # failure must never cost us the level, which is the point.
+                try:
+                    behavior = win.collectionBehavior()
+                    behavior &= ~NSWindowCollectionBehaviorMoveToActiveSpace
+                    behavior |= NSWindowCollectionBehaviorCanJoinAllSpaces
+                    win.setCollectionBehavior_(behavior)
+                except Exception as exc:
+                    if not self._menubar_level_warned:
+                        self._menubar_level_warned = True
+                        print(f"claude-usage: menu-bar strip is above the bar but "
+                              f"not on all Spaces: {exc}", file=sys.stderr)
+            else:
+                on_top = bool(getattr(self, "_always_on_top", True))
+                win.setLevel_(NSFloatingWindowLevel if on_top else NSNormalWindowLevel)
+        except Exception as exc:
+            if not self._menubar_level_warned:
+                self._menubar_level_warned = True
+                print(f"claude-usage: could not set menu-bar window level: {exc}",
+                      file=sys.stderr)
+
+    def set_strip_in_menubar(self, on: bool) -> None:
+        self._strip_in_menubar = bool(on)
+        self._apply_menubar_level()
+        if self._position != OSD_POSITION_CUSTOM:
+            self._move_to_default_position()
+        self.update()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._apply_menubar_level()
+
     def _strip_dials(self) -> list[tuple[str, float]]:
         from claude_usage.menubar import DIAL_ALL, DIAL_SCOPED, DIAL_SESSION
         dials = [(DIAL_SESSION, self._session_pct), (DIAL_ALL, self._weekly_pct)]
@@ -430,6 +518,7 @@ class UsageOverlay(QWidget):
             return
         self._view_mode = mode
         self._apply_size()
+        self._apply_menubar_level()
         # Gauge and strip views have no ticker — stop the animation to save CPU.
         if mode in (VIEW_MODE_GAUGE, VIEW_MODE_STRIP):
             self._ticker_timer.stop()
@@ -599,7 +688,7 @@ class UsageOverlay(QWidget):
         screen = QApplication.primaryScreen()
         if screen is None:
             return
-        geo = screen.availableGeometry()
+        geo = self._anchor_geometry(screen)
         w, h = self.width(), self.height()
 
         if self._position == OSD_POSITION_CUSTOM and self._custom_xy is not None:
@@ -613,6 +702,11 @@ class UsageOverlay(QWidget):
         left = geo.x() + OSD_MARGIN
         right = geo.x() + geo.width() - w - OSD_MARGIN
         top = geo.y() + OSD_MARGIN
+        if self._strip_in_menubar_active():
+            # Top presets park the strip INSIDE the menu bar, vertically
+            # centred in the band, so "Top Right" means "in the bar, right".
+            bar_h = screen.availableGeometry().y() - screen.geometry().y()
+            top = screen.geometry().y() + max(0, (bar_h - h) // 2)
         bottom = geo.y() + geo.height() - h - OSD_MARGIN
         anchors = {
             OSD_POSITION_TOP_LEFT: (left, top),

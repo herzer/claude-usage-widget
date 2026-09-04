@@ -40,6 +40,7 @@ app = QApplication(sys.argv)
 cfg = dict(load_config(os.path.expanduser("~/.config/claude-usage/config.json")))
 cfg["osd_view_mode"] = VIEW_MODE_STRIP
 cfg["osd_minimized"] = False
+cfg["osd_position"] = "top-right"     # in menu-bar mode this means IN the bar, right
 stats = mock()
 
 osd = UsageOverlay(cfg); osd.update_stats(stats); osd.show()

@@ -1306,6 +1306,13 @@ class ClaudeUsageApp(QObject):
         self._act_on_top.toggled.connect(self._on_toggle_always_on_top)
         m.addAction(self._act_on_top)
 
+        # Strip view only: float above the macOS menu bar and park in it.
+        self._act_menubar_strip = QAction("▔  Strip in menu bar", m)
+        self._act_menubar_strip.setCheckable(True)
+        self._act_menubar_strip.setChecked(bool(self.config.get("strip_in_menubar", False)))
+        self._act_menubar_strip.toggled.connect(self._on_toggle_strip_in_menubar)
+        m.addAction(self._act_menubar_strip)
+
         m.aboutToShow.connect(self._sync_menu_state)
 
         m.addSeparator()
@@ -1343,6 +1350,11 @@ class ClaudeUsageApp(QObject):
     def _on_toggle_always_on_top(self, checked: bool) -> None:
         self.overlay.set_always_on_top(checked)
         self.config["osd_always_on_top"] = bool(checked)
+        self._persist_config()
+
+    def _on_toggle_strip_in_menubar(self, checked: bool) -> None:
+        self.overlay.set_strip_in_menubar(checked)
+        self.config["strip_in_menubar"] = bool(checked)
         self._persist_config()
 
     def _on_pick_theme(self, name: str) -> None:
