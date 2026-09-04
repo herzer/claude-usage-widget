@@ -231,10 +231,13 @@ class MenuBarIndicator:
 
     def _repaint(self) -> None:
         dials = self._visible_dials()
-        self._tray.setVisible(bool(dials))
         if not dials:
+            self._tray.setVisible(False)
             return
+        # Icon BEFORE visibility: Qt warns "No Icon set" if a tray item is
+        # shown while still iconless, and on some platforms shows a gap.
         self._tray.setIcon(QIcon(render_indicator_pixmap(self._theme, dials)))
+        self._tray.setVisible(True)
         names = {**DIAL_TITLES, DIAL_SCOPED: self._scoped_label or "Scoped"}
         self._tray.setToolTip("   ".join(
             f"{names[k]}: {_pct_text(v)}" for k, v in dials))
