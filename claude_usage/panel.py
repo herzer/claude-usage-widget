@@ -33,7 +33,10 @@ from claude_usage.menubar import (
 DIAL_LABELS = {
     DIAL_SESSION: "5-hour",
     DIAL_ALL: "All models",
-    DIAL_SCOPED: "Scoped",
+    # Generic on purpose: the API names this cap (today "Fable 5"), and it is
+    # whichever model-scoped weekly you are closest to hitting -- not a fixed
+    # model. "Scoped" was jargon that made users ask what it meant.
+    DIAL_SCOPED: "Model cap",
 }
 
 CONTROL_H = 26
@@ -515,6 +518,7 @@ class HeartPanel(QWidget):
 
     dialToggled = Signal(str, bool)
     appearanceChanged = Signal(bool)      # True = dark
+    scopedLabelSeen = Signal(str)         # persist the API's name for the cap
 
     def __init__(self, config: dict[str, Any], parent=None) -> None:
         super().__init__(parent)
@@ -636,8 +640,16 @@ class HeartPanel(QWidget):
         self._limits.set_values(
             rows, _fmt_at(int(getattr(stats, "weekly_reset", 0) or 0)))
 
+        # A cold or throttled start has no label yet; show the last one the API
+        # gave us rather than the generic word. Still derived FROM the id --
+        # nothing reads the label back to make a decision.
+        if scoped_label:
+            if scoped_label != self._config.get("last_scoped_label"):
+                self._config["last_scoped_label"] = scoped_label
+                self.scopedLabelSeen.emit(scoped_label)
+        remembered = scoped_label or str(self._config.get("last_scoped_label", "") or "")
         self._dials.set_scoped_available(bool(scoped_label))
-        self._dials.set_scoped_label(scoped_label)
+        self._dials.set_scoped_label(remembered)
 
         plan = str(getattr(stats, "subscription_type", "") or "")
         self._plan.setText(plan.capitalize() if plan else "")

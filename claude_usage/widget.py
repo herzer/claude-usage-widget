@@ -1050,6 +1050,7 @@ class ClaudeUsageApp(QObject):
         self.heart_panel = HeartPanel(config)
         self.heart_panel.dialToggled.connect(self._on_dial_toggled)
         self.heart_panel.appearanceChanged.connect(self._on_panel_appearance)
+        self.heart_panel.scopedLabelSeen.connect(self._on_scoped_label_seen)
 
         # Context menu shown on right-click of the OSD.
         self._context_menu = QMenu()
@@ -1745,6 +1746,12 @@ class ClaudeUsageApp(QObject):
         if self.menubar is not None:
             self.menubar.set_config(self.config)
         self._persist_config()
+
+    def _on_scoped_label_seen(self, label: str) -> None:
+        """Remember what the API calls the model-scoped cap."""
+        if label and label != self.config.get("last_scoped_label"):
+            self.config["last_scoped_label"] = label
+            self._persist_config()
 
     def _on_panel_appearance(self, dark: bool) -> None:
         self.config["panel_dark"] = bool(dark)

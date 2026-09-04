@@ -104,6 +104,9 @@ DEFAULT_CONFIG: Config = {
     # Verbose panel: "heart" (card layout) or "classic" (upstream popup).
     "panel_style": "heart",
     "panel_dark": True,
+    # Last model-scoped cap name the API reported (e.g. "Fable 5"), so a cold
+    # or rate-limited start can still name it instead of saying "Model cap".
+    "last_scoped_label": "",
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"
