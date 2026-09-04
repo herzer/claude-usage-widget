@@ -573,6 +573,15 @@ class UsageOverlay(QWidget):
     def _strip_width(self) -> int:
         return self._strip_layout()["width"]
 
+    def _strip_diag_ok(self) -> bool:
+        """At most one strip diagnostic per second, so a drag does not spam."""
+        import time as _t
+        now = _t.time()
+        if now - getattr(self, "_strip_diag_ts", 0.0) < 1.0:
+            return False
+        self._strip_diag_ts = now
+        return True
+
     def _on_scale_grip(self, local_pos) -> bool:
         if self._view_mode != VIEW_MODE_STRIP or self._minimized:
             return False
@@ -585,6 +594,9 @@ class UsageOverlay(QWidget):
             return
         self._scale = new_scale
         self._apply_size()
+        if self._scaling and getattr(self, "_scale_anchor", None) is not None:
+            a = self._scale_anchor
+            self.move(a.x() - self.width(), a.y())
         self.update()
         if self._position == OSD_POSITION_CUSTOM:
             tl = self.frameGeometry().topLeft()
@@ -732,6 +744,7 @@ class UsageOverlay(QWidget):
         if self._view_mode == VIEW_MODE_STRIP:
             width = self._strip_width()
             base = STRIP_HEIGHT
+            self._strip_want = (width, int(STRIP_HEIGHT * self._scale))
         elif self._view_mode == VIEW_MODE_GAUGE:
             base = GAUGE_HEIGHT + (GAUGE_SCOPED_ROW_HEIGHT if self._scoped_label else 0)
             if self._codex_available:
@@ -754,6 +767,14 @@ class UsageOverlay(QWidget):
             self.move(tr.x() - width, tr.y())
         else:
             self.resize(width, height)
+        # Strip only: did the native window actually take the size? A
+        # disagreement here is the on-device "tall box, small dials" bug.
+        want = getattr(self, "_strip_want", None)
+        if (want is not None and self._view_mode == VIEW_MODE_STRIP and self.isVisible()
+                and (self.width(), self.height()) != want and self._strip_diag_ok()):
+            import sys
+            print(f"claude-usage: strip resize refused: have {self.width()}x{self.height()}, "
+                  f"want {want[0]}x{want[1]}, scale={self._scale:.2f}", file=sys.stderr)
 
     def _move_to_default_position(self) -> None:
         """Anchor the overlay according to the configured ``_position``.
@@ -879,6 +900,10 @@ class UsageOverlay(QWidget):
             self._scaling = True
             self._scale_press = event.globalPosition().toPoint()
             self._scale_start = self._scale
+            # Fixed anchor for the whole drag. _apply_size re-reads
+            # frameGeometry() per step, which can lag a resize on macOS and
+            # feed back into the next step.
+            self._scale_anchor = self.frameGeometry().topRight()
             self._press_pos = None          # not a move, not a click
             return
         if event.button() == Qt.LeftButton:
@@ -1060,8 +1085,16 @@ class UsageOverlay(QWidget):
         p.setRenderHint(QPainter.TextAntialiasing, True)
         L = self._strip_layout()
         t = tokens(self._strip_dark)
-        cy = h / 2
+        # Centre on the LAYOUT height, never the window's. If the two ever
+        # disagree (seen on device), the rings, dots and grip must still
+        # share one centre line -- splitting them is how the grip floated
+        # away from the dials.
+        cy = L["h"] / 2
         s = self._scale
+        if abs(h - L["h"]) > 1 and self._strip_diag_ok():
+            import sys
+            print(f"claude-usage: strip paint: window {w}x{h} but layout "
+                  f"{L['width']}x{L['h']:.0f} scale={self._scale:.2f}", file=sys.stderr)
 
         # Surface: rounded rectangle. A capsule read as a pill; this reads
         # as a control.
@@ -1080,17 +1113,18 @@ class UsageOverlay(QWidget):
             for row in (-1, 0, 1):
                 p.drawEllipse(QPointF(hx + col * step, cy + row * step), dot, dot)
 
-        # Scale grip (right end): three diagonal strokes, the resize glyph
-        # every platform already teaches. Drag right/down to grow, left/up
-        # to shrink.
+        # Scale grip (right end): the classic triangular dot grip -- rows of
+        # 1, 2, 3 dots filling the lower-right corner. Same dots and spacing
+        # as the move handle, so the two ends speak one language while the
+        # shapes stay distinct. Drag right/down to grow, left/up to shrink.
         g = L["grip"]
-        gp = QPen(_hex_to_qcolor(t["text_dim"]), max(1.0, L["h"] * 0.045))
-        gp.setCapStyle(Qt.RoundCap)
-        p.setPen(gp)
-        p.setBrush(Qt.NoBrush)
-        for i in range(3):
-            off = i * g.width() / 3
-            p.drawLine(QPointF(g.left() + off, g.bottom()), QPointF(g.right(), g.top() + off))
+        p.setPen(Qt.NoPen)
+        p.setBrush(_hex_to_qcolor(t["text_dim"]))
+        ox = g.center().x() - step          # 3x3 lattice centred in the grip
+        oy = g.center().y() - step
+        for r in range(3):
+            for c in range(2 - r, 3):
+                p.drawEllipse(QPointF(ox + c * step, oy + r * step), dot, dot)
 
         ring_d, stroke = L["ring_d"], L["stroke"]
         track = _hex_to_qcolor(t["track"])
