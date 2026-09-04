@@ -654,6 +654,48 @@ def _ssl_context() -> ssl.SSLContext:
         return ssl.create_default_context()
 
 
+# Throttle for the refresh subprocess. A revoked or logged-out session 401s
+# forever; without this the widget would spawn a CLI process on every poll.
+_REFRESH_MIN_INTERVAL = 300.0
+_last_refresh_attempt = 0.0
+
+
+def _refresh_credentials_via_cli(timeout: float = 30.0) -> bool:
+    """Ask the official CLI to renew the stored OAuth token. Returns True if
+    the refresh command ran successfully.
+
+    We deliberately do NOT reimplement the OAuth refresh here. Doing so would
+    mean hardcoding Anthropic's token endpoint and public client id and then
+    keeping them correct forever -- a maintenance trap, and one that breaks
+    silently and looks exactly like an auth bug when it does. ``claude auth
+    status`` is a supported, non-interactive, zero-token command that
+    validates the session, which makes the CLI renew the access token from the
+    refresh token it already holds and write it back to the very Keychain item
+    this module reads. Delegating to the vendor's own client keeps us correct
+    across any future change to their OAuth.
+    """
+    global _last_refresh_attempt
+    now = time.time()
+    if now - _last_refresh_attempt < _REFRESH_MIN_INTERVAL:
+        return False
+    _last_refresh_attempt = now
+
+    import shutil
+    import subprocess
+    exe = shutil.which("claude")
+    if not exe:
+        return False
+    try:
+        proc = subprocess.run(
+            [exe, "auth", "status"],
+            capture_output=True, text=True, timeout=timeout,
+            stdin=subprocess.DEVNULL,   # never let it block on a prompt
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
 def fetch_rate_limits(claude_dir: str) -> dict[str, Any]:
     """Fetch the user's plan utilization from Anthropic.
 
@@ -680,6 +722,19 @@ def fetch_rate_limits(claude_dir: str) -> dict[str, Any]:
     primary = _fetch_oauth_usage(token)
     if "error" not in primary:
         return primary
+
+    # Expired access token: the credentials blob carries a refreshToken that
+    # this widget never used, so a lapsed token meant blank bars until the
+    # user happened to run the CLI by hand. Ask the CLI to renew it, re-read
+    # the store, and retry exactly once. Only retried when the token actually
+    # changed, so a failed refresh cannot cause a second pointless request.
+    if primary.get("expired") and _refresh_credentials_via_cli():
+        refreshed = _load_credentials(claude_dir)
+        if refreshed and refreshed != token:
+            retried = _fetch_oauth_usage(refreshed)
+            if "error" not in retried:
+                return retried
+            primary = retried
     # If we were merely rate-limited, return that calm state directly. The
     # /v1/messages fallback below sends the OAuth token as an x-api-key,
     # which always 401s for OAuth users and would mislabel a throttle as
@@ -778,7 +833,8 @@ def _fetch_oauth_usage(token: str) -> dict[str, Any]:
             break
         except HTTPError as e:
             if e.code == 401:
-                return {"error": "Credentials expired -- re-authenticate with 'claude'"}
+                return {"error": "Credentials expired -- re-authenticate with 'claude'",
+                        "expired": True}
             if e.code == 429:
                 # A 429 here is budget-based, not a momentary blip: this
                 # endpoint replies "Retry-After: 0" (or sends no Retry-After

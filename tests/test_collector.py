@@ -1534,3 +1534,88 @@ class TestRetryAfterPropagation(unittest.TestCase):
 
     def test_stats_default_retry_after_is_zero(self) -> None:
         self.assertEqual(UsageStats().retry_after_seconds, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Expired-token refresh (delegated to the official CLI)
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialRefresh(unittest.TestCase):
+    """A 401 must trigger exactly one CLI-delegated refresh + retry.
+
+    The credentials blob always carried a refreshToken this widget never used,
+    so a lapsed access token blanked the bars until the user happened to run
+    the CLI by hand. Refresh is delegated to `claude auth status` rather than
+    reimplemented, so these tests assert the *orchestration*, not any OAuth
+    wire format.
+    """
+
+    def setUp(self) -> None:
+        import claude_usage.collector as c
+        c._last_refresh_attempt = 0.0   # throttle must not leak between tests
+
+    def test_401_refreshes_then_retries_with_new_token(self) -> None:
+        import claude_usage.collector as c
+        seen: list[str] = []
+
+        def fake_fetch(token: str):
+            seen.append(token)
+            if token == "old":
+                return {"error": "Credentials expired", "expired": True}
+            return {"session_utilization": 0.42, "session_reset": 0,
+                    "weekly_utilization": 0.1, "weekly_reset": 0,
+                    "scoped_utilization": 0.0, "scoped_reset": 0,
+                    "scoped_label": "", "overage_status": "", "fallback_status": ""}
+
+        with patch.object(c, "_fetch_oauth_usage", fake_fetch), \
+             patch.object(c, "_load_credentials", lambda d: "old" if not seen else "new"), \
+             patch.object(c, "_refresh_credentials_via_cli", lambda **kw: True):
+            result = c.fetch_rate_limits("/tmp")
+
+        self.assertEqual(seen, ["old", "new"])       # exactly one retry
+        self.assertNotIn("error", result)
+        self.assertEqual(result["session_utilization"], 0.42)
+
+    def test_no_retry_when_token_unchanged(self) -> None:
+        # A refresh that "succeeds" but leaves the same token must NOT cause a
+        # second identical request — that is just burning a rate-limit budget.
+        import claude_usage.collector as c
+        calls = {"n": 0}
+
+        def fake_fetch(token: str):
+            calls["n"] += 1
+            return {"error": "Credentials expired", "expired": True}
+
+        with patch.object(c, "_fetch_oauth_usage", fake_fetch), \
+             patch.object(c, "_load_credentials", lambda d: "same"), \
+             patch.object(c, "_refresh_credentials_via_cli", lambda **kw: True):
+            result = c.fetch_rate_limits("/tmp")
+
+        self.assertEqual(calls["n"], 1)
+        self.assertIn("error", result)
+
+    def test_refresh_is_throttled(self) -> None:
+        # A revoked login 401s forever; the subprocess must not run per poll.
+        import claude_usage.collector as c
+        runs = {"n": 0}
+
+        def fake_run(*a, **kw):
+            runs["n"] += 1
+            class P:
+                returncode = 0
+            return P()
+
+        with patch("shutil.which", lambda n: "/usr/bin/claude"), \
+             patch("subprocess.run", fake_run):
+            first = c._refresh_credentials_via_cli()
+            second = c._refresh_credentials_via_cli()
+
+        self.assertTrue(first)
+        self.assertFalse(second)      # throttled
+        self.assertEqual(runs["n"], 1)
+
+    def test_missing_cli_is_not_fatal(self) -> None:
+        import claude_usage.collector as c
+        with patch("shutil.which", lambda n: None):
+            self.assertFalse(c._refresh_credentials_via_cli())
