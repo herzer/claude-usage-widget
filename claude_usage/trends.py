@@ -37,6 +37,50 @@ def daily_heatmap(
     return buckets
 
 
+def day_hour_grid(
+    samples: list[dict],
+    now: float,
+    n_days: int = 7,
+    key: str = "session",
+) -> tuple[list[float], list[int]]:
+    """Peak utilization per (day, hour) for the last ``n_days`` days.
+
+    Returns ``(grid, day_starts)`` where ``grid`` is row-major with
+    ``n_days`` rows of 24 hourly cells -- row 0 the oldest day, row -1 today --
+    and ``day_starts`` holds each row's local midnight epoch so the caller can
+    label rows without recomputing the calendar.
+
+    Local time, not UTC: the point of the grid is "when do I actually work",
+    which is a wall-clock question.
+    """
+    import time as _t
+
+    if n_days <= 0:
+        return [], []
+    # Local midnight of today, then walk back whole days.
+    lt = _t.localtime(now)
+    today_start = _t.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    day_starts = [today_start - (n_days - 1 - i) * 86400 for i in range(n_days)]
+
+    grid = [0.0] * (n_days * 24)
+    oldest = day_starts[0]
+    for s in samples:
+        ts = float(s.get("ts", 0))
+        if ts < oldest or ts > now:
+            continue
+        st = _t.localtime(ts)
+        day_start = _t.mktime((st.tm_year, st.tm_mon, st.tm_mday, 0, 0, 0, 0, 0, -1))
+        try:
+            row = day_starts.index(day_start)
+        except ValueError:
+            continue  # DST-shifted edge; skip rather than mis-bucket.
+        idx = row * 24 + st.tm_hour
+        val = float(s.get(key, 0))
+        if val > grid[idx]:
+            grid[idx] = val
+    return grid, [int(d) for d in day_starts]
+
+
 def monthly_summary(
     samples: list[dict],
     now: float,

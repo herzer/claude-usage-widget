@@ -1,0 +1,626 @@
+"""Verbose panel, card-based, light + dark.
+
+Replaces the stacked-label popup with the layout Stefanie asked for: a big
+5-hour ring card beside a 7-day limits card, an activity heatmap with a
+Week/Month switch, and the toggles that decide which dials the menu bar shows.
+
+Design rules being honoured here (house rules, not preference):
+  * light AND dark are paired tokens -- neither is an afterthought;
+  * ONE declared control height, never a height left to emerge from padding;
+  * singular/plural written out, never "(s)";
+  * no data stored in a display string -- the dial toggles key off enum-ish
+    dial ids from `menubar`, never off the visible label.
+"""
+from __future__ import annotations
+
+from typing import Any, Callable
+
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import (
+    QColor, QFont, QLinearGradient, QPainter, QPaintEvent, QPen,
+)
+from PySide6.QtWidgets import (
+    QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton,
+    QSizePolicy, QVBoxLayout, QWidget,
+)
+
+from claude_usage.menubar import (
+    DIAL_ALL, DIAL_CONFIG_KEYS, DIAL_ORDER, DIAL_SCOPED, DIAL_SESSION,
+    IDENTITY_HUES,
+)
+
+# --- Declared control height (see house rule) -------------------------------
+DIAL_LABELS = {
+    DIAL_SESSION: "5-hour",
+    DIAL_ALL: "All models",
+    DIAL_SCOPED: "Scoped",
+}
+
+CONTROL_H = 26
+CONTROL_H_SM = 22
+
+PANEL_W = 560
+CARD_RADIUS = 14
+CARD_PAD = 16
+GUTTER = 12
+
+
+# --- Paired tokens. Every colour is defined in BOTH maps, never only one. ----
+DARK = {
+    "bg":        "#1e1e24",   # a touch lighter than upstream's near-black
+    "card":      "#26262e",
+    "card_edge": "#33333d",
+    "track":     "#35353f",
+    "text":      "#f1f1f5",
+    "text_2":    "#a2a2b0",
+    "text_dim":  "#71717f",
+    "warn":      "#f5a524",
+    "crit":      "#f04438",
+    "heat_0":    "#2a2a33",
+}
+LIGHT = {
+    "bg":        "#f5f5f8",
+    "card":      "#ffffff",
+    "card_edge": "#e4e4ea",
+    "track":     "#e9e9ef",
+    "text":      "#1b1b21",
+    "text_2":    "#5c5c6a",
+    "text_dim":  "#8c8c9a",
+    "warn":      "#b26a00",
+    "crit":      "#c0392f",
+    "heat_0":    "#eaeaf0",
+}
+# Accents are shared but darkened for light mode so they clear 4.5:1 on white.
+ACCENTS_DARK = dict(IDENTITY_HUES)
+ACCENTS_LIGHT = {DIAL_SESSION: "#2f6fae", DIAL_ALL: "#1a8f4a", DIAL_SCOPED: "#6d43cf"}
+
+
+def tokens(dark: bool) -> dict[str, str]:
+    t = dict(DARK if dark else LIGHT)
+    for k, v in (ACCENTS_DARK if dark else ACCENTS_LIGHT).items():
+        t[f"accent_{k}"] = v
+    return t
+
+
+def accent_for(kind: str, pct: float, t: dict[str, str]) -> QColor:
+    """Identity hue normally, severity hue once the cap is actually at risk."""
+    if pct >= 0.85:
+        return QColor(t["crit"])
+    if pct >= 0.60:
+        return QColor(t["warn"])
+    return QColor(t[f"accent_{kind}"])
+
+
+def _font(pt: float, weight: int = QFont.Normal, caps: bool = False) -> QFont:
+    f = QFont()
+    f.setPointSizeF(pt)
+    f.setWeight(weight)
+    if caps:
+        f.setCapitalization(QFont.AllUppercase)
+        f.setLetterSpacing(QFont.PercentageSpacing, 108)
+    return f
+
+
+class Card(QFrame):
+    """Rounded surface every section sits on."""
+
+    def __init__(self, t: dict[str, str], parent=None) -> None:
+        super().__init__(parent)
+        self._t = t
+        self.setAttribute(Qt.WA_StyledBackground, False)
+
+    def set_tokens(self, t: dict[str, str]) -> None:
+        self._t = t
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
+        p.setBrush(QColor(self._t["card"]))
+        p.setPen(QPen(QColor(self._t["card_edge"]), 1))
+        p.drawRoundedRect(r, CARD_RADIUS, CARD_RADIUS)
+        p.end()
+
+
+class RingCard(Card):
+    """The 5-hour limit: one large ring, the number, and the reset line."""
+
+    RING_D = 118
+    RING_STROKE = 9
+
+    def __init__(self, t: dict[str, str], parent=None) -> None:
+        super().__init__(t, parent)
+        self._pct = 0.0
+        self._reset_text = ""
+        self.setMinimumSize(196, 214)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def set_value(self, pct: float, reset_text: str) -> None:
+        self._pct = max(0.0, min(1.0, pct))
+        self._reset_text = reset_text
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        t = self._t
+        cx = self.width() / 2
+        cy = CARD_PAD + self.RING_D / 2 + 6
+        rect = QRectF(cx - self.RING_D / 2, cy - self.RING_D / 2,
+                      self.RING_D, self.RING_D)
+
+        pen = QPen(QColor(t["track"]), self.RING_STROKE)
+        pen.setCapStyle(Qt.FlatCap)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(rect)
+
+        if self._pct > 0:
+            col = accent_for(DIAL_SESSION, self._pct, t)
+            # A gradient across the arc reads as depth without a drop shadow,
+            # which is what makes this feel less flat than a solid stroke.
+            grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
+            grad.setColorAt(0.0, col.lighter(126))
+            grad.setColorAt(1.0, col)
+            fill = QPen(grad, self.RING_STROKE)
+            fill.setCapStyle(Qt.RoundCap)
+            p.setPen(fill)
+            p.drawArc(rect, 90 * 16, -int(self._pct * 360 * 16))
+
+        # Percentage: the headline. The % sign is deliberately smaller and
+        # dimmer so the digits carry the glance.
+        num = f"{int(round(self._pct * 100))}"
+        p.setFont(_font(34, QFont.DemiBold))
+        fmn = p.fontMetrics()
+        p.setFont(_font(14, QFont.Medium))
+        fms = p.fontMetrics()
+        total = fmn.horizontalAdvance(num) + 2 + fms.horizontalAdvance("%")
+        x = cx - total / 2
+        p.setFont(_font(34, QFont.DemiBold))
+        p.setPen(QColor(t["text"]))
+        p.drawText(QPointF(x, cy + fmn.capHeight() / 2), num)
+        p.setFont(_font(14, QFont.Medium))
+        p.setPen(QColor(t["text_2"]))
+        p.drawText(QPointF(x + fmn.horizontalAdvance(num) + 2,
+                           cy + fmn.capHeight() / 2), "%")
+
+        y = cy + self.RING_D / 2 + 26
+        p.setFont(_font(9.5, QFont.DemiBold, caps=True))
+        p.setPen(QColor(t["text_2"]))
+        fm = p.fontMetrics()
+        label = "5-hour limit"
+        p.drawText(QPointF(cx - fm.horizontalAdvance(label) / 2, y), label)
+
+        if self._reset_text:
+            p.setFont(_font(11))
+            p.setPen(QColor(t["text_dim"]))
+            fm = p.fontMetrics()
+            p.drawText(QPointF(cx - fm.horizontalAdvance(self._reset_text) / 2,
+                               y + 20), self._reset_text)
+        p.end()
+
+
+class LimitsCard(Card):
+    """The 7-day caps: all-models plus the model-scoped one, as labelled bars."""
+
+    BAR_H = 8
+
+    def __init__(self, t: dict[str, str], parent=None) -> None:
+        super().__init__(t, parent)
+        self._reset_text = ""
+        self._rows: list[tuple[str, str, float]] = []   # (kind, label, pct)
+        self.setMinimumSize(228, 214)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def set_values(self, rows, reset_text: str) -> None:
+        self._rows = list(rows)
+        self._reset_text = reset_text
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        t = self._t
+        x0, x1 = CARD_PAD, self.width() - CARD_PAD
+
+        p.setFont(_font(9.5, QFont.DemiBold, caps=True))
+        p.setPen(QColor(t["text_2"]))
+        p.drawText(QPointF(x0, CARD_PAD + 10), "7-day limits")
+        if self._reset_text:
+            p.setFont(_font(10))
+            p.setPen(QColor(t["text_dim"]))
+            fm = p.fontMetrics()
+            p.drawText(QPointF(x1 - fm.horizontalAdvance(self._reset_text),
+                               CARD_PAD + 10), self._reset_text)
+
+        y = CARD_PAD + 44
+        for kind, label, pct in self._rows:
+            p.setFont(_font(12.5, QFont.DemiBold))
+            p.setPen(QColor(t["text"]))
+            p.drawText(QPointF(x0, y), label)
+            pct_s = f"{int(round(pct * 100))}%"
+            fm = p.fontMetrics()
+            p.setPen(QColor(t["text_2"]))
+            p.drawText(QPointF(x1 - fm.horizontalAdvance(pct_s), y), pct_s)
+
+            by = y + 12
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(t["track"]))
+            p.drawRoundedRect(QRectF(x0, by, x1 - x0, self.BAR_H),
+                              self.BAR_H / 2, self.BAR_H / 2)
+            if pct > 0:
+                col = accent_for(kind, pct, t)
+                grad = QLinearGradient(x0, 0, x1, 0)
+                grad.setColorAt(0.0, col.darker(118))
+                grad.setColorAt(1.0, col.lighter(118))
+                p.setBrush(grad)
+                w = max((x1 - x0) * pct, self.BAR_H)
+                p.drawRoundedRect(QRectF(x0, by, w, self.BAR_H),
+                                  self.BAR_H / 2, self.BAR_H / 2)
+            y += 62
+        p.end()
+
+
+class HeatmapCard(Card):
+    """Activity grid. ``buckets`` is a list of 0..1 intensities, row-major."""
+
+    CELL = 11
+    CELL_GAP = 3
+
+    def __init__(self, t: dict[str, str], rows: int = 7, cols: int = 24,
+                 parent=None) -> None:
+        super().__init__(t, parent)
+        self._rows, self._cols = rows, cols
+        self._buckets: list[float] = []
+        self._row_labels: list[str] = []
+        self._col_labels: list[tuple[int, str]] = []
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMinimumHeight(self._needed_height())
+
+    def _needed_height(self) -> int:
+        return int(CARD_PAD * 2 + 34 + self._rows * (self.CELL + self.CELL_GAP))
+
+    def set_grid(self, buckets, row_labels, col_labels) -> None:
+        self._buckets = list(buckets)
+        self._row_labels = list(row_labels)
+        self._col_labels = list(col_labels)
+        self.setMinimumHeight(self._needed_height())
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        t = self._t
+        gutter = 30
+        x0 = CARD_PAD + gutter
+        y0 = CARD_PAD + 30
+
+        p.setFont(_font(8.5))
+        p.setPen(QColor(t["text_dim"]))
+        for idx, text in self._col_labels:
+            if idx < self._cols:
+                p.drawText(QPointF(x0 + idx * (self.CELL + self.CELL_GAP),
+                                   y0 - 8), text)
+
+        base = QColor(t["heat_0"])
+        accent = QColor(t["accent_" + DIAL_ALL])
+        for r in range(self._rows):
+            if r < len(self._row_labels):
+                p.setFont(_font(8.5))
+                p.setPen(QColor(t["text_dim"]))
+                p.drawText(QPointF(CARD_PAD,
+                                   y0 + r * (self.CELL + self.CELL_GAP) + self.CELL - 1),
+                           self._row_labels[r])
+            for c in range(self._cols):
+                i = r * self._cols + c
+                v = self._buckets[i] if i < len(self._buckets) else 0.0
+                col = QColor(base)
+                if v > 0:
+                    # Blend toward the accent; alpha alone would wash out on
+                    # the light card, so interpolate the channels instead.
+                    f = 0.18 + 0.82 * min(1.0, v)
+                    col = QColor(
+                        int(base.red() + (accent.red() - base.red()) * f),
+                        int(base.green() + (accent.green() - base.green()) * f),
+                        int(base.blue() + (accent.blue() - base.blue()) * f),
+                    )
+                p.setPen(Qt.NoPen)
+                p.setBrush(col)
+                p.drawRoundedRect(
+                    QRectF(x0 + c * (self.CELL + self.CELL_GAP),
+                           y0 + r * (self.CELL + self.CELL_GAP),
+                           self.CELL, self.CELL), 2.5, 2.5)
+        p.end()
+
+
+class Segmented(QWidget):
+    """Two-state mode switch (Week | Month).
+
+    A segmented control is correct here and NOT the wrong choice it would be
+    for navigation: these are two views of one thing, not two places to go.
+    """
+
+    changed = Signal(str)
+
+    def __init__(self, options: list[str], t: dict[str, str], parent=None) -> None:
+        super().__init__(parent)
+        self._t = t
+        self._buttons: list[QPushButton] = []
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        for i, opt in enumerate(options):
+            b = QPushButton(opt)
+            b.setCheckable(True)
+            b.setChecked(i == 0)
+            b.setFixedHeight(CONTROL_H_SM)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, o=opt: self.changed.emit(o))
+            group.addButton(b)
+            lay.addWidget(b)
+            self._buttons.append(b)
+        self.set_tokens(t)
+
+    def set_tokens(self, t: dict[str, str]) -> None:
+        self._t = t
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; border: none; border-radius: 6px;
+                padding: 0 11px; color: {t['text_dim']}; font-size: 11px;
+                font-weight: 600;
+            }}
+            QPushButton:checked {{ background: {t['track']}; color: {t['text']}; }}
+            QPushButton:hover:!checked {{ color: {t['text_2']}; }}
+        """)
+
+
+class DialToggles(QWidget):
+    """Which of the three dials the menu bar shows."""
+
+    toggled = Signal(str, bool)
+
+    def __init__(self, config: dict[str, Any], t: dict[str, str], parent=None) -> None:
+        super().__init__(parent)
+        self._t = t
+        self._boxes: dict[str, QCheckBox] = {}
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(16)
+        cap = QLabel("Menu bar")
+        cap.setObjectName("cap")
+        lay.addWidget(cap)
+        for kind in DIAL_ORDER:
+            cb = QCheckBox(DIAL_LABELS[kind])
+            cb.setChecked(bool(config.get(DIAL_CONFIG_KEYS[kind], True)))
+            cb.setFixedHeight(CONTROL_H_SM)
+            cb.setCursor(Qt.PointingHandCursor)
+            cb.toggled.connect(lambda on, k=kind: self.toggled.emit(k, on))
+            self._boxes[kind] = cb
+            lay.addWidget(cb)
+        lay.addStretch(1)
+        self.set_tokens(t)
+
+    def set_scoped_label(self, label: str) -> None:
+        """Rename the scoped checkbox to the cap the API is reporting.
+
+        The label is derived FROM the dial id, never read back to decide
+        anything -- the toggle keys off DIAL_SCOPED regardless of wording.
+        """
+        self._boxes[DIAL_SCOPED].setText(label or DIAL_LABELS[DIAL_SCOPED])
+
+    def set_scoped_available(self, available: bool) -> None:
+        self._boxes[DIAL_SCOPED].setEnabled(available)
+
+    def set_tokens(self, t: dict[str, str]) -> None:
+        self._t = t
+        dots = "".join(
+            f"""QCheckBox#dial_{k}::indicator:checked {{ background: {t['accent_' + k]};
+                 border-color: {t['accent_' + k]}; }}"""
+            for k in DIAL_ORDER)
+        for k, cb in self._boxes.items():
+            cb.setObjectName(f"dial_{k}")
+        self.setStyleSheet(f"""
+            QLabel#cap {{ color: {t['text_dim']}; font-size: 11px; font-weight: 600; }}
+            QCheckBox {{ color: {t['text_2']}; font-size: 11px; spacing: 6px; }}
+            QCheckBox:disabled {{ color: {t['text_dim']}; }}
+            QCheckBox::indicator {{
+                width: 12px; height: 12px; border-radius: 4px;
+                border: 1.5px solid {t['track']}; background: transparent;
+            }}
+            {dots}
+        """)
+
+
+
+def _fmt_in(reset_ts: int, now: float | None = None) -> str:
+    """"Resets in 4h 42m". Singular and plural are written out, never "(s)"."""
+    import time as _t
+    if not reset_ts:
+        return ""
+    secs = int(reset_ts - (now if now is not None else _t.time()))
+    if secs <= 0:
+        return "Resetting now"
+    h, m = secs // 3600, (secs % 3600) // 60
+    if h >= 24:
+        d = h // 24
+        return "Resets in 1 day" if d == 1 else f"Resets in {d} days"
+    if h and m:
+        return f"Resets in {h}h {m}m"
+    if h:
+        return "Resets in 1 hour" if h == 1 else f"Resets in {h} hours"
+    return "Resets in 1 minute" if m == 1 else f"Resets in {m} minutes"
+
+
+def _fmt_at(reset_ts: int) -> str:
+    """"Resets Thu 05:59"."""
+    import time as _t
+    if not reset_ts:
+        return ""
+    return _t.strftime("Resets %a %H:%M", _t.localtime(reset_ts))
+
+
+class HeartPanel(QWidget):
+    """The verbose panel: ring card, limits card, activity grid, dial toggles."""
+
+    dialToggled = Signal(str, bool)
+    appearanceChanged = Signal(bool)      # True = dark
+
+    def __init__(self, config: dict[str, Any], parent=None) -> None:
+        super().__init__(parent)
+        self._config = dict(config)
+        self._dark = bool(config.get("panel_dark", True))
+        self._t = tokens(self._dark)
+        self._mode = "Week"
+        self._stats: Any = None
+        self.setWindowTitle("Claude Usage")
+        self.setMinimumWidth(PANEL_W)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(GUTTER, GUTTER, GUTTER, GUTTER)
+        root.setSpacing(GUTTER)
+
+        # --- header -------------------------------------------------------
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        self._title = QLabel("Claude Usage")
+        self._title.setObjectName("title")
+        self._plan = QLabel("")
+        self._plan.setObjectName("plan")
+        self._plan.setFixedHeight(CONTROL_H_SM)
+        self._plan.setAlignment(Qt.AlignCenter)
+        self._appearance = QPushButton("Light")
+        self._appearance.setFixedHeight(CONTROL_H_SM)
+        self._appearance.setCursor(Qt.PointingHandCursor)
+        self._appearance.clicked.connect(self._flip_appearance)
+        head.addWidget(self._title)
+        head.addWidget(self._plan)
+        head.addStretch(1)
+        head.addWidget(self._appearance)
+        root.addLayout(head)
+
+        # --- ring + limits ------------------------------------------------
+        cards = QHBoxLayout()
+        cards.setSpacing(GUTTER)
+        self._ring = RingCard(self._t)
+        self._limits = LimitsCard(self._t)
+        cards.addWidget(self._ring, 42)
+        cards.addWidget(self._limits, 58)
+        root.addLayout(cards)
+
+        # --- activity -----------------------------------------------------
+        act_head = QHBoxLayout()
+        self._act_label = QLabel("Activity")
+        self._act_label.setObjectName("section")
+        self._seg = Segmented(["Week", "Month"], self._t)
+        self._seg.changed.connect(self._set_mode)
+        act_head.addWidget(self._act_label)
+        act_head.addStretch(1)
+        act_head.addWidget(self._seg)
+        root.addLayout(act_head)
+
+        self._heat = HeatmapCard(self._t)
+        root.addWidget(self._heat)
+
+        # --- dial toggles -------------------------------------------------
+        self._dials = DialToggles(self._config, self._t)
+        self._dials.toggled.connect(self.dialToggled.emit)
+        root.addWidget(self._dials)
+
+        self._apply_tokens()
+
+    # -- appearance --------------------------------------------------------
+    def _flip_appearance(self) -> None:
+        self.set_dark(not self._dark)
+        self.appearanceChanged.emit(self._dark)
+
+    def set_dark(self, dark: bool) -> None:
+        self._dark = bool(dark)
+        self._t = tokens(self._dark)
+        self._apply_tokens()
+        if self._stats is not None:
+            self.update_stats(self._stats)
+
+    def _apply_tokens(self) -> None:
+        t = self._t
+        self._appearance.setText("Light" if self._dark else "Dark")
+        for w in (self._ring, self._limits, self._heat):
+            w.set_tokens(t)
+        self._seg.set_tokens(t)
+        self._dials.set_tokens(t)
+        self.setStyleSheet(f"""
+            HeartPanel {{ background: {t['bg']}; }}
+            QLabel#title {{ color: {t['text']}; font-size: 15px; font-weight: 700; }}
+            QLabel#section {{ color: {t['text']}; font-size: 12px; font-weight: 700; }}
+            QLabel#plan {{
+                color: {t['text_2']}; background: {t['track']};
+                border-radius: 6px; padding: 0 8px;
+                font-size: 10px; font-weight: 700;
+            }}
+            QPushButton {{
+                background: {t['track']}; color: {t['text_2']};
+                border: none; border-radius: 6px; padding: 0 12px;
+                font-size: 11px; font-weight: 600;
+            }}
+            QPushButton:hover {{ color: {t['text']}; }}
+        """)
+        self.update()
+
+    def _set_mode(self, mode: str) -> None:
+        self._mode = mode
+        if self._stats is not None:
+            self._render_activity(self._stats)
+
+    # -- data --------------------------------------------------------------
+    def update_stats(self, stats: Any) -> None:
+        self._stats = stats
+        g = lambda n, d=0.0: float(getattr(stats, n, d) or d)  # noqa: E731
+
+        self._ring.set_value(g("session_utilization"),
+                             _fmt_in(int(getattr(stats, "session_reset", 0) or 0)))
+
+        scoped_label = str(getattr(stats, "scoped_label", "") or "")
+        rows = [(DIAL_ALL, "All models", g("weekly_utilization"))]
+        if scoped_label:
+            rows.append((DIAL_SCOPED, scoped_label, g("scoped_utilization")))
+        self._limits.set_values(
+            rows, _fmt_at(int(getattr(stats, "weekly_reset", 0) or 0)))
+
+        self._dials.set_scoped_available(bool(scoped_label))
+        self._dials.set_scoped_label(scoped_label)
+
+        plan = str(getattr(stats, "subscription_type", "") or "")
+        self._plan.setText(plan.capitalize() if plan else "")
+        self._plan.setVisible(bool(plan))
+
+        self._render_activity(stats)
+
+    def _render_activity(self, stats: Any) -> None:
+        import time as _t
+        if self._mode == "Week":
+            grid = list(getattr(stats, "week_hour_grid", []) or [])
+            days = list(getattr(stats, "week_hour_days", []) or [])
+            self._heat._rows, self._heat._cols = 7, 24
+            row_labels = [_t.strftime("%a", _t.localtime(d)) for d in days] or \
+                         ["" for _ in range(7)]
+            col_labels = [(h, f"{h:02d}") for h in range(0, 24, 3)]
+            self._heat.set_grid(grid, row_labels, col_labels)
+        else:
+            # 90-day view as a GitHub-style 7 x 13 calendar, newest column last.
+            flat = list(getattr(stats, "daily_heatmap", []) or [])
+            cols = 13
+            cells = flat[-(cols * 7):]
+            cells = [0.0] * (cols * 7 - len(cells)) + cells
+            # daily_heatmap is day-sequential; transpose into row=weekday.
+            grid = [0.0] * (7 * cols)
+            for i, v in enumerate(cells):
+                grid[(i % 7) * cols + (i // 7)] = v
+            self._heat._rows, self._heat._cols = 7, cols
+            self._heat.set_grid(grid, ["Mon", "", "Wed", "", "Fri", "", "Sun"], [])

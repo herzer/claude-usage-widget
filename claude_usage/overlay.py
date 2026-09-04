@@ -52,7 +52,10 @@ SCOPED_ROW_HEIGHT = 31
 # Gauge view is slightly taller than bars because the rings + label + reset
 # stack vertically inside each column. No ticker in this view (it would
 # collide with the reset line under each ring).
-GAUGE_HEIGHT = 130
+GAUGE_HEIGHT = 106
+# Gauge view gets its own scoped-cap row height: the bars view needs a taller
+# row for its label+bar stack, the gauge only tucks a slim strip under the rings.
+GAUGE_SCOPED_ROW_HEIGHT = 30
 # Extra height for the optional Codex ring row (a second Session/Weekly pair
 # drawn beneath Claude's; same stack minus the shared top padding).
 CODEX_GAUGE_ROW_HEIGHT = 118
@@ -521,7 +524,7 @@ class UsageOverlay(QWidget):
 
         width = int(BASE_WIDTH * self._scale)
         if self._view_mode == VIEW_MODE_GAUGE:
-            base = GAUGE_HEIGHT + (SCOPED_ROW_HEIGHT if self._scoped_label else 0)
+            base = GAUGE_HEIGHT + (GAUGE_SCOPED_ROW_HEIGHT if self._scoped_label else 0)
             if self._codex_available:
                 base += CODEX_GAUGE_ROW_HEIGHT
         else:
@@ -846,8 +849,9 @@ class UsageOverlay(QWidget):
         # With the Codex provider active, a second row of rings (Codex 5h /
         # 7d) is drawn beneath Claude's Session / Weekly pair.
         col_w = w / 2
-        ring_d = max(50.0, min(col_w * 0.58, 80 * s))
-        ring_stroke = max(4.0, 7 * s)
+        ring_d = max(50.0, min(col_w * 0.60, 70 * s))
+        # Thinner stroke reads as a finer instrument; 7pt looked like a toy.
+        ring_stroke = max(3.5, 5.5 * s)
         ring_rows: list[tuple[tuple[str, float, int], ...]] = [(
             ("Session", self._session_pct, self._session_reset),
             ("Weekly",  self._weekly_pct,  self._weekly_reset),
@@ -859,7 +863,7 @@ class UsageOverlay(QWidget):
             ))
         # Centre each ring inside its column, with room below for labels.
         for row_idx, row in enumerate(ring_rows):
-            row_top = (12 + row_idx * CODEX_GAUGE_ROW_HEIGHT) * s
+            row_top = (9 + row_idx * CODEX_GAUGE_ROW_HEIGHT) * s
             for idx, (label, pct, reset_ts) in enumerate(row):
                 cx = col_w * idx + col_w / 2
                 cy = row_top + ring_d / 2
@@ -868,7 +872,7 @@ class UsageOverlay(QWidget):
 
                 # Percentage text centred in the ring.
                 pct_text = f"{int(pct * 100)}%"
-                pct_font_pt = max(10, int(13 * s))
+                pct_font_pt = max(11, int(15 * s))
                 p.setFont(_mono_font(pct_font_pt, bold=True))
                 p.setPen(_hex_to_qcolor(self._theme["text_primary"]))
                 fm = p.fontMetrics()
@@ -876,22 +880,24 @@ class UsageOverlay(QWidget):
                 p.drawText(QPointF(cx - pct_w / 2, cy + fm.ascent() / 2 - 2 * s), pct_text)
 
                 # Label + reset beneath the ring.
-                label_y = cy + ring_d / 2 + 14 * s
-                label_font_pt = max(8, int(9 * s))
+                label_y = cy + ring_d / 2 + 12 * s
+                label_font_pt = max(8, int(8.5 * s))
                 p.setFont(_mono_font(label_font_pt, bold=True))
-                p.setPen(_hex_to_qcolor(self._theme["text_primary"]))
+                # Secondary, not primary: the number is the headline, the
+                # label is just the caption telling you which number it is.
+                p.setPen(_hex_to_qcolor(self._theme["text_secondary"]))
                 fm = p.fontMetrics()
                 lw = fm.horizontalAdvance(label)
                 p.drawText(QPointF(cx - lw / 2, label_y), label)
 
                 reset_label = _format_reset_short(reset_ts)
                 if reset_label:
-                    reset_font_pt = max(7, int(7.5 * s))
+                    reset_font_pt = max(7, int(7 * s))
                     p.setFont(_mono_font(reset_font_pt))
                     p.setPen(_hex_to_qcolor(self._theme["text_dim"]))
                     fm = p.fontMetrics()
                     rw = fm.horizontalAdvance(reset_label)
-                    p.drawText(QPointF(cx - rw / 2, label_y + 12 * s), reset_label)
+                    p.drawText(QPointF(cx - rw / 2, label_y + 11 * s), reset_label)
 
         # Burn / spike badge — centred along the top strip, which sits clear
         # above both ring tops (rings begin at y = 12·s; the gauge draws no
@@ -915,7 +921,7 @@ class UsageOverlay(QWidget):
             pad_x = 14 * s
             bar_h = OSD_BAR_HEIGHT * s
             bar_w = w - 2 * pad_x
-            row_y = h - 22 * s
+            row_y = h - 19 * s
             label = f"{self._scoped_label} {int(self._scoped_pct * 100)}%"
             p.setFont(_mono_font(max(8, int(9 * s)), bold=True))
             p.setPen(_hex_to_qcolor(self._theme["text_primary"]))

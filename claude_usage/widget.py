@@ -38,6 +38,8 @@ from PySide6.QtWidgets import (
 from claude_usage.collector import UsageStats, collect_all
 from claude_usage.forecast import format_forecast
 from claude_usage.notifier import UsageNotifier
+from claude_usage.menubar import MenuBarIndicator
+from claude_usage.panel import HeartPanel
 from claude_usage.overlay import UsageOverlay, _hex_to_qcolor
 from claude_usage.pricing import MODEL_PRICING, calculate_cost, get_pricing
 from claude_usage.themes import ThemeStyle, get_style, get_theme
@@ -1042,10 +1044,33 @@ class ClaudeUsageApp(QObject):
         self.overlay = UsageOverlay(config)
         self.popup = UsagePopup(config)
         self.skin_popup = SkinPopupWidget(config)
+        # Card-based verbose panel (ring + 7-day limits + activity + dial
+        # toggles). Default surface; the upstream popup stays reachable via
+        # panel_style="classic".
+        self.heart_panel = HeartPanel(config)
+        self.heart_panel.dialToggled.connect(self._on_dial_toggled)
+        self.heart_panel.appearanceChanged.connect(self._on_panel_appearance)
 
         # Context menu shown on right-click of the OSD.
         self._context_menu = QMenu()
         self._build_context_menu()
+
+        # macOS menu-bar dials (All models + model-scoped weekly). Shares the
+        # OSD's context menu so there is exactly one menu to maintain. Failure
+        # here is non-fatal: a missing system tray must not cost the user the
+        # whole widget.
+        self.menubar: MenuBarIndicator | None = None
+        if config.get("menubar_enabled", True):
+            try:
+                self.menubar = MenuBarIndicator(
+                    get_theme(str(config.get("theme", "default"))),
+                    config,
+                    menu=self._context_menu,
+                )
+            except Exception as exc:
+                print(f"claude-usage: menu-bar indicator unavailable: {exc}",
+                      file=sys.stderr)
+                self.menubar = None
 
         # Webhook dispatcher + notifier
         from claude_usage.webhooks import WebhookDispatcher
@@ -1318,6 +1343,8 @@ class ClaudeUsageApp(QObject):
         if self.skin_popup.isVisible():
             self.skin_popup.hide()
         self.overlay.set_theme(name)
+        if self.menubar is not None:
+            self.menubar.set_theme(get_theme(name))
         merged = {**self.config, "theme": name}
         self.popup.apply_config(merged)
         self.skin_popup.apply_config(merged)
@@ -1621,6 +1648,9 @@ class ClaudeUsageApp(QObject):
         self.overlay.update_stats(stats)
         self.popup.update_stats(stats)
         self.skin_popup.update_stats(stats)
+        self.heart_panel.update_stats(stats)
+        if self.menubar is not None:
+            self.menubar.update_stats(stats)
         self.notifier.check_stats(stats)
 
         # Real-time burn/spike/retry-storm — debounced once-per-episode desktop
@@ -1698,6 +1728,21 @@ class ClaudeUsageApp(QObject):
 
     # -------------------------------------------------------------- slots
 
+    def _on_dial_toggled(self, kind: str, on: bool) -> None:
+        """Persist one menu-bar dial toggle and repaint the indicator."""
+        from claude_usage.menubar import DIAL_CONFIG_KEYS
+        key = DIAL_CONFIG_KEYS.get(kind)
+        if not key:
+            return
+        self.config[key] = bool(on)
+        if self.menubar is not None:
+            self.menubar.set_config(self.config)
+        self._persist_config()
+
+    def _on_panel_appearance(self, dark: bool) -> None:
+        self.config["panel_dark"] = bool(dark)
+        self._persist_config()
+
     def _on_overlay_click(self) -> None:
         self._show_popup()
 
@@ -1710,12 +1755,18 @@ class ClaudeUsageApp(QObject):
         # use SkinPopupWidget (pure paintEvent).
         from claude_usage.skins import SKIN_MODULES
         theme_name = str(self.config.get("theme", "default"))
-        target = self.skin_popup if theme_name in SKIN_MODULES else self.popup
-        # Hide the other so both windows aren't on-screen simultaneously.
-        other = self.popup if target is self.skin_popup else self.skin_popup
-        if other.isVisible():
-            other.hide()
+        if theme_name in SKIN_MODULES:
+            target = self.skin_popup
+        elif str(self.config.get("panel_style", "heart")) == "heart":
+            target = self.heart_panel
+        else:
+            target = self.popup
+        # Hide the others so only one panel window is ever on-screen.
+        for other in (self.popup, self.skin_popup, self.heart_panel):
+            if other is not target and other.isVisible():
+                other.hide()
         target.show()
+        target.raise_()
         target.raise_()
         target.activateWindow()
 

@@ -34,7 +34,9 @@ from claude_usage.history import aggregate, append_sample, load_samples, prune
 from claude_usage.live_stream import LiveActivity, detect_live_activity
 from claude_usage.subagents import count_active_subagents
 from claude_usage.ticker import TickerItem, scan_ticker_items
-from claude_usage.trends import daily_heatmap, hourly_histogram, monthly_summary
+from claude_usage.trends import (
+    daily_heatmap, day_hour_grid, hourly_histogram, monthly_summary,
+)
 from claude_usage.news_fetcher import NewsItem, get_news_items
 
 HISTORY_FILENAME = "usage-history.jsonl"
@@ -116,6 +118,10 @@ class UsageStats:
     yearly_heatmap: list = field(default_factory=list)      # 364-day peaks (52 wk × 7 d)
     monthly_summary: list = field(default_factory=list)     # last 6 months
     hourly_histogram: list = field(default_factory=list)    # 24 buckets
+    # Last 7 days x 24 hours of peak session utilization, row-major, oldest
+    # row first -- drives the panel's Week activity grid.
+    week_hour_grid: list = field(default_factory=list)
+    week_hour_days: list = field(default_factory=list)      # local midnight per row
     # Prompt-cache savings opportunities (top N repeated prefixes)
     cache_opportunities: list[CacheOpportunity] = field(default_factory=list)
     # Live-activity snapshot for the OSD indicator
@@ -1180,6 +1186,8 @@ def collect_all(config: dict[str, Any]) -> UsageStats:
     stats.yearly_heatmap = daily_heatmap(samples, now=now_ts, n_days=364)
     stats.monthly_summary = monthly_summary(samples, now=now_ts, n_months=6)
     stats.hourly_histogram = hourly_histogram(samples, now=now_ts)
+    stats.week_hour_grid, stats.week_hour_days = day_hour_grid(
+        samples, now=now_ts, n_days=7)
 
     # Prompt-cache savings opportunities — scans ~/.claude/projects/ for
     # repeated prompt prefixes; bounded cost by the mtime cutoff in the

@@ -95,6 +95,15 @@ DEFAULT_CONFIG: Config = {
     # News ticker (opt-in): a second strip with Anthropic/Claude headlines.
     # Off by default because it calls out to a third-party feed.
     "show_news": False,
+    # macOS menu-bar dials for the two 7-day caps (All models + model-scoped).
+    "menubar_enabled": True,
+    # Per-dial toggles, flipped from the verbose panel.
+    "menubar_show_session": True,
+    "menubar_show_all": True,
+    "menubar_show_scoped": True,
+    # Verbose panel: "heart" (card layout) or "classic" (upstream popup).
+    "panel_style": "heart",
+    "panel_dark": True,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"
