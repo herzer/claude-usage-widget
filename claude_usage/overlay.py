@@ -240,6 +240,12 @@ class UsageOverlay(QWidget):
         # default.
         self._strip_in_menubar: bool = bool(cfg.get("strip_in_menubar", False))
         self._menubar_level_warned: bool = False
+        # Scale-grip drag state (strip view). Kept separate from the move
+        # drag so a grip press can never also start a move.
+        self._scaling: bool = False
+        self._scale_press: QPoint | None = None
+        self._scale_start: float = 1.0
+        self.setMouseTracking(True)     # hover cursor over the grip
 
         # Live stats — updated externally via update_stats()
         self._session_pct: float = 0.0
@@ -526,8 +532,12 @@ class UsageOverlay(QWidget):
         pad = h * 0.22
         ring_d = h * STRIP_RING_FRACTION
         stroke = max(2.0, ring_d * STRIP_STROKE_FRACTION)
+        # Left end: the move handle (dot grid). Right end: the scale grip,
+        # its mirror -- same size and weight, different glyph -- because
+        # scroll-to-scale over a 30 px bar has no good place to aim at.
         handle_x = pad
         handle_w = h * 0.22
+        grip_w = h * 0.26
 
         in_px = max(STRIP_MIN_TEXT_PX, ring_d * 0.28)
         out_px = max(STRIP_MIN_TEXT_PX, h * 0.33)
@@ -552,12 +562,31 @@ class UsageOverlay(QWidget):
         # drop the trailing inter-dial gap, add the right pad
         if dials:
             x -= (h * 0.30 if inside else h * 0.35)
-        width = int(round(x + pad))
+        grip_x = x + h * 0.28
+        width = int(round(grip_x + grip_w + pad * 0.6))
         return {"h": h, "pad": pad, "ring_d": ring_d, "stroke": stroke,
-                "handle_x": handle_x, "dials": dials, "width": width}
+                "handle_x": handle_x, "dials": dials, "width": width,
+                "grip": QRectF(grip_x, h * 0.25, grip_w, h * 0.50)}
 
     def _strip_width(self) -> int:
         return self._strip_layout()["width"]
+
+    def _on_scale_grip(self, local_pos) -> bool:
+        if self._view_mode != VIEW_MODE_STRIP or self._minimized:
+            return False
+        return self._strip_layout()["grip"].adjusted(-3, -3, 3, 3).contains(local_pos)
+
+    def _set_scale(self, new_scale: float) -> None:
+        """Apply a scale (clamped) exactly the way the wheel does."""
+        new_scale = max(SCALE_MIN, min(SCALE_MAX, new_scale))
+        if new_scale == self._scale:
+            return
+        self._scale = new_scale
+        self._apply_size()
+        self.update()
+        if self._position == OSD_POSITION_CUSTOM:
+            tl = self.frameGeometry().topLeft()
+            self._custom_xy = (tl.x(), tl.y())
 
     def set_view_mode(self, mode: str) -> None:
         """Switch between bar and gauge rendering; resizes the OSD to match."""
@@ -844,6 +873,12 @@ class UsageOverlay(QWidget):
     # --------------------------------------------------------------- events
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.LeftButton and self._on_scale_grip(event.position()):
+            self._scaling = True
+            self._scale_press = event.globalPosition().toPoint()
+            self._scale_start = self._scale
+            self._press_pos = None          # not a move, not a click
+            return
         if event.button() == Qt.LeftButton:
             self._press_pos = event.globalPosition().toPoint()
             self._press_win_pos = self.frameGeometry().topLeft()
@@ -853,7 +888,18 @@ class UsageOverlay(QWidget):
             self.rightClicked.emit(event.globalPosition().toPoint())
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._scaling and self._scale_press is not None:
+            d = event.globalPosition().toPoint() - self._scale_press
+            # Right or down grows, left or up shrinks -- the bottom-right
+            # resize convention. In menu-bar mode the right edge is pinned
+            # to the screen, so growth shows as the strip extending left;
+            # the mapping stays the conventional one regardless.
+            self._set_scale(self._scale_start + (d.x() + d.y()) / 150.0)
+            return
         if self._press_pos is None:
+            # Hover: advertise the grip.
+            self.setCursor(Qt.SizeFDiagCursor if self._on_scale_grip(event.position())
+                           else Qt.ArrowCursor)
             return
         delta = event.globalPosition().toPoint() - self._press_pos
         if not self._dragging and (abs(delta.x()) > DRAG_THRESHOLD or abs(delta.y()) > DRAG_THRESHOLD):
@@ -867,6 +913,11 @@ class UsageOverlay(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.LeftButton:
+            return
+        if self._scaling:
+            self._scaling = False
+            self._scale_press = None
+            self.scaledTo.emit(self._scale)     # persist once, not per pixel
             return
         if self._press_pos is not None and not self._dragging:
             # Check if click landed on the news strip (bottom NEWS_STRIP_HEIGHT px).
@@ -1026,6 +1077,18 @@ class UsageOverlay(QWidget):
         for col in (0, 1):
             for row in (-1, 0, 1):
                 p.drawEllipse(QPointF(hx + col * step, cy + row * step), dot, dot)
+
+        # Scale grip (right end): three diagonal strokes, the resize glyph
+        # every platform already teaches. Drag right/down to grow, left/up
+        # to shrink.
+        g = L["grip"]
+        gp = QPen(_hex_to_qcolor(t["text_dim"]), max(1.0, L["h"] * 0.045))
+        gp.setCapStyle(Qt.RoundCap)
+        p.setPen(gp)
+        p.setBrush(Qt.NoBrush)
+        for i in range(3):
+            off = i * g.width() / 3
+            p.drawLine(QPointF(g.left() + off, g.bottom()), QPointF(g.right(), g.top() + off))
 
         ring_d, stroke = L["ring_d"], L["stroke"]
         track = _hex_to_qcolor(t["track"])
