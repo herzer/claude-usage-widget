@@ -49,7 +49,10 @@ GUTTER = 12
 DARK = {
     "bg":        "#1e1e24",   # a touch lighter than upstream's near-black
     "card":      "#26262e",
+    "card_top":  "#2e2e38",   # top of the surface gradient
     "card_edge": "#33333d",
+    "edge_hi":   "#ffffff",   # lit top edge; alpha applied separately
+    "edge_hi_a": "20",       # Qt parses #AARRGGBB, NOT CSS #RRGGBBAA -- never inline it
     "track":     "#35353f",
     "text":      "#f1f1f5",
     "text_2":    "#a2a2b0",
@@ -60,8 +63,11 @@ DARK = {
 }
 LIGHT = {
     "bg":        "#f5f5f8",
-    "card":      "#ffffff",
+    "card":      "#fbfbfd",
+    "card_top":  "#ffffff",
     "card_edge": "#e4e4ea",
+    "edge_hi":   "#ffffff",
+    "edge_hi_a": "210",
     "track":     "#e9e9ef",
     "text":      "#1b1b21",
     "text_2":    "#5c5c6a",
@@ -116,10 +122,30 @@ class Card(QFrame):
     def paintEvent(self, event: QPaintEvent) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
+        t = self._t
         r = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
-        p.setBrush(QColor(self._t["card"]))
-        p.setPen(QPen(QColor(self._t["card_edge"]), 1))
+        # A shallow top-down gradient reads as a lit surface rather than a
+        # flat swatch; it is deliberately narrow in range so it never looks
+        # like a "glossy" 2010 gradient.
+        grad = QLinearGradient(0, r.top(), 0, r.bottom())
+        grad.setColorAt(0.0, QColor(t.get("card_top", t["card"])))
+        grad.setColorAt(1.0, QColor(t["card"]))
+        p.setBrush(grad)
+        p.setPen(QPen(QColor(t["card_edge"]), 1))
         p.drawRoundedRect(r, CARD_RADIUS, CARD_RADIUS)
+        # Lit top edge: one hairline inside the border, clipped to the top
+        # third so it reads as a highlight, not a second border.
+        hi = QColor(t.get("edge_hi", "#ffffff"))
+        hi.setAlpha(int(t.get("edge_hi_a", "0")))
+        if hi.alpha():
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(hi, 1))
+            inner = r.adjusted(1, 1, -1, -1)
+            p.save()
+            p.setClipRect(QRectF(inner.left(), inner.top(),
+                                 inner.width(), inner.height() * 0.34))
+            p.drawRoundedRect(inner, CARD_RADIUS - 1, CARD_RADIUS - 1)
+            p.restore()
         p.end()
 
 
@@ -160,6 +186,17 @@ class RingCard(Card):
 
         if self._pct > 0:
             col = accent_for(DIAL_SESSION, self._pct, t)
+            # Glow: the same arc drawn a few times underneath, wider and
+            # fainter each pass. Cheaper than a blur and it survives being
+            # drawn on either a light or a dark surface.
+            span = -int(self._pct * 360 * 16)
+            for grow, alpha in ((10, 26), (6, 34), (3, 44)):
+                g = QColor(col)
+                g.setAlpha(alpha)
+                gp = QPen(g, self.RING_STROKE + grow)
+                gp.setCapStyle(Qt.RoundCap)
+                p.setPen(gp)
+                p.drawArc(rect, 90 * 16, span)
             # A gradient across the arc reads as depth without a drop shadow,
             # which is what makes this feel less flat than a solid stroke.
             grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
@@ -258,8 +295,14 @@ class LimitsCard(Card):
                 grad = QLinearGradient(x0, 0, x1, 0)
                 grad.setColorAt(0.0, col.darker(118))
                 grad.setColorAt(1.0, col.lighter(118))
-                p.setBrush(grad)
                 w = max((x1 - x0) * pct, self.BAR_H)
+                # Soft halo at the leading edge, so the bar looks like it is
+                # emitting rather than just ending.
+                halo = QColor(col); halo.setAlpha(58)
+                p.setBrush(halo)
+                p.drawRoundedRect(QRectF(x0, by - 2, w, self.BAR_H + 4),
+                                  (self.BAR_H + 4) / 2, (self.BAR_H + 4) / 2)
+                p.setBrush(grad)
                 p.drawRoundedRect(QRectF(x0, by, w, self.BAR_H),
                                   self.BAR_H / 2, self.BAR_H / 2)
             y += 62

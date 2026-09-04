@@ -25,9 +25,9 @@ def mock():
             grid.append(base)
     days = [now - (6 - i) * 86400 for i in range(7)]
     return UsageStats(
-        session_utilization=0.02, session_reset=int(now + 4 * 3600 + 42 * 60),
-        weekly_utilization=0.20, weekly_reset=int(now + 3 * 86400),
-        scoped_utilization=0.26, scoped_label="Fable 5",
+        session_utilization=float(os.environ.get('MOCK_SESSION', 0.02)), session_reset=int(now + 4 * 3600 + 42 * 60),
+        weekly_utilization=float(os.environ.get('MOCK_WEEKLY', 0.20)), weekly_reset=int(now + 3 * 86400),
+        scoped_utilization=float(os.environ.get('MOCK_SCOPED', 0.26)), scoped_label="Fable 5",
         subscription_type="max", today_cost=438.39,
         week_hour_grid=grid, week_hour_days=[int(d) for d in days],
         daily_heatmap=[rnd.uniform(0, 1) if rnd.random() > 0.3 else 0.0 for _ in range(91)],
