@@ -599,10 +599,7 @@ class UsageOverlay(QWidget):
         if new_scale == self._scale:
             return
         self._scale = new_scale
-        self._apply_size()
-        if self._scaling and getattr(self, "_scale_anchor", None) is not None:
-            a = self._scale_anchor
-            self.move(a.x() - self.width(), a.y())
+        self._apply_size()          # anchored setGeometry during a drag
         self.update()
         if self._position == OSD_POSITION_CUSTOM:
             tl = self.frameGeometry().topLeft()
@@ -768,9 +765,14 @@ class UsageOverlay(QWidget):
         # Preserve the top-right corner when resizing so the overlay doesn't
         # visually drift as the user scrolls to scale.
         if self.isVisible():
-            tr = self.frameGeometry().topRight()
-            self.resize(width, height)
-            self.move(tr.x() - width, tr.y())
+            # During a scale drag use the anchor captured at press; otherwise
+            # the current top-right. Either way ONE setGeometry, not a
+            # resize followed by a move: on macOS that pair paints as two
+            # frames per mouse pixel, and reading geometry back between them
+            # returns the stale value -- the visible "glitch".
+            anchor = self._scale_anchor if (self._scaling and getattr(self, "_scale_anchor", None) is not None) \
+                else self.frameGeometry().topRight()
+            self.setGeometry(anchor.x() - width, anchor.y(), width, height)
         else:
             self.resize(width, height)
         # Strip only: did the native window actually take the size? A
@@ -950,6 +952,7 @@ class UsageOverlay(QWidget):
         if self._scaling:
             self._scaling = False
             self._scale_press = None
+            self._scale_anchor = None
             self.scaledTo.emit(self._scale)     # persist once, not per pixel
             return
         if self._press_pos is not None and not self._dragging:
