@@ -70,8 +70,10 @@ VIEW_MODE_GAUGE = "gauge"
 VIEW_MODE_STRIP = "strip"
 VIEW_MODES = (VIEW_MODE_BARS, VIEW_MODE_GAUGE, VIEW_MODE_STRIP)
 STRIP_HEIGHT = 30
-STRIP_RING_D = 16
-STRIP_RING_STROKE = 2.6
+# Ring size is DERIVED from the pill height, not a second constant, so the
+# rings always fill the same proportion of the strip however it is scaled.
+STRIP_RING_FRACTION = 0.66
+STRIP_STROKE_FRACTION = 0.16
 # Screen-anchor presets the OSD can snap to. "custom" means use the exact
 # osd_x / osd_y coordinates from config (set when the user drags the widget).
 OSD_POSITION_TOP_LEFT = "top-left"
@@ -417,7 +419,8 @@ class UsageOverlay(QWidget):
         fm = QFontMetrics(_mono_font(max(8, int(9.5 * s)), bold=True))
         slot = fm.horizontalAdvance("100%")
         handle = 22 * s
-        per_dial = STRIP_RING_D * s + 5 * s + slot + 12 * s
+        ring_d = STRIP_HEIGHT * s * STRIP_RING_FRACTION
+        per_dial = ring_d + 5 * s + slot + 12 * s
         n = len(self._strip_dials())
         return int(handle + n * per_dial - 12 * s + 10 * s)
 
@@ -881,8 +884,8 @@ class UsageOverlay(QWidget):
                               1.3 * s, 1.3 * s)
 
         # Dials.
-        ring_d = STRIP_RING_D * s
-        stroke = STRIP_RING_STROKE * s
+        ring_d = h * STRIP_RING_FRACTION
+        stroke = max(2.0, ring_d * STRIP_STROKE_FRACTION)
         font = _mono_font(max(8, int(9.5 * s)), bold=True)
         p.setFont(font)
         fm = p.fontMetrics()

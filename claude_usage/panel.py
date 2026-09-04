@@ -42,9 +42,9 @@ DIAL_LABELS = {
 CONTROL_H = 26
 CONTROL_H_SM = 22
 
-PANEL_W = 560
+PANEL_W = 420
 CARD_RADIUS = 14
-CARD_PAD = 16
+CARD_PAD = 14
 GUTTER = 12
 
 
@@ -155,14 +155,14 @@ class Card(QFrame):
 class RingCard(Card):
     """The 5-hour limit: one large ring, the number, and the reset line."""
 
-    RING_D = 118
-    RING_STROKE = 9
+    RING_D = 96
+    RING_STROKE = 8
 
     def __init__(self, t: dict[str, str], parent=None) -> None:
         super().__init__(t, parent)
         self._pct = 0.0
         self._reset_text = ""
-        self.setMinimumSize(196, 214)
+        self.setMinimumSize(160, 196)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def set_value(self, pct: float, reset_text: str) -> None:
@@ -213,13 +213,13 @@ class RingCard(Card):
         # Percentage: the headline. The % sign is deliberately smaller and
         # dimmer so the digits carry the glance.
         num = f"{int(round(self._pct * 100))}"
-        p.setFont(_font(34, QFont.DemiBold))
+        p.setFont(_font(30, QFont.DemiBold))
         fmn = p.fontMetrics()
         p.setFont(_font(14, QFont.Medium))
         fms = p.fontMetrics()
         total = fmn.horizontalAdvance(num) + 2 + fms.horizontalAdvance("%")
         x = cx - total / 2
-        p.setFont(_font(34, QFont.DemiBold))
+        p.setFont(_font(30, QFont.DemiBold))
         p.setPen(QColor(t["text"]))
         p.drawText(QPointF(x, cy + fmn.capHeight() / 2), num)
         p.setFont(_font(14, QFont.Medium))
@@ -252,7 +252,7 @@ class LimitsCard(Card):
         super().__init__(t, parent)
         self._reset_text = ""
         self._rows: list[tuple[str, str, float]] = []   # (kind, label, pct)
-        self.setMinimumSize(228, 214)
+        self.setMinimumSize(212, 196)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def set_values(self, rows, reset_text: str) -> None:
@@ -308,15 +308,16 @@ class LimitsCard(Card):
                 p.setBrush(grad)
                 p.drawRoundedRect(QRectF(x0, by, w, self.BAR_H),
                                   self.BAR_H / 2, self.BAR_H / 2)
-            y += 62
+            y += 56
         p.end()
 
 
 class HeatmapCard(Card):
     """Activity grid. ``buckets`` is a list of 0..1 intensities, row-major."""
 
-    CELL = 11
+    CELL_MAX = 12
     CELL_GAP = 3
+    GUTTER_L = 30
 
     def __init__(self, t: dict[str, str], rows: int = 7, cols: int = 24,
                  parent=None) -> None:
@@ -328,8 +329,15 @@ class HeatmapCard(Card):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setMinimumHeight(self._needed_height())
 
+    def _cell(self) -> float:
+        """Cell size that fills the card width for the current column count,
+        capped so a 13-week Month grid does not balloon."""
+        avail = self.width() - 2 * CARD_PAD - self.GUTTER_L
+        c = (avail - (self._cols - 1) * self.CELL_GAP) / max(1, self._cols)
+        return max(7.0, min(float(self.CELL_MAX), c))
+
     def _needed_height(self) -> int:
-        return int(CARD_PAD * 2 + 34 + self._rows * (self.CELL + self.CELL_GAP))
+        return int(CARD_PAD * 2 + 34 + self._rows * (self.CELL_MAX + self.CELL_GAP))
 
     def set_grid(self, buckets, row_labels, col_labels) -> None:
         self._buckets = list(buckets)
@@ -343,16 +351,16 @@ class HeatmapCard(Card):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         t = self._t
-        gutter = 30
-        x0 = CARD_PAD + gutter
+        cell = self._cell()
+        pitch = cell + self.CELL_GAP
+        x0 = CARD_PAD + self.GUTTER_L
         y0 = CARD_PAD + 30
 
         p.setFont(_font(8.5))
         p.setPen(QColor(t["text_dim"]))
         for idx, text in self._col_labels:
             if idx < self._cols:
-                p.drawText(QPointF(x0 + idx * (self.CELL + self.CELL_GAP),
-                                   y0 - 8), text)
+                p.drawText(QPointF(x0 + idx * pitch, y0 - 8), text)
 
         base = QColor(t["heat_0"])
         accent = QColor(t["accent_" + DIAL_ALL])
@@ -360,12 +368,13 @@ class HeatmapCard(Card):
             if r < len(self._row_labels):
                 p.setFont(_font(8.5))
                 p.setPen(QColor(t["text_dim"]))
-                p.drawText(QPointF(CARD_PAD,
-                                   y0 + r * (self.CELL + self.CELL_GAP) + self.CELL - 1),
+                p.drawText(QPointF(CARD_PAD, y0 + r * pitch + cell - 1),
                            self._row_labels[r])
             for c in range(self._cols):
                 i = r * self._cols + c
                 v = self._buckets[i] if i < len(self._buckets) else 0.0
+                if v is None:
+                    continue          # no such day (before the first Monday)
                 col = QColor(base)
                 if v > 0:
                     # Blend toward the accent; alpha alone would wash out on
@@ -379,9 +388,7 @@ class HeatmapCard(Card):
                 p.setPen(Qt.NoPen)
                 p.setBrush(col)
                 p.drawRoundedRect(
-                    QRectF(x0 + c * (self.CELL + self.CELL_GAP),
-                           y0 + r * (self.CELL + self.CELL_GAP),
-                           self.CELL, self.CELL), 2.5, 2.5)
+                    QRectF(x0 + c * pitch, y0 + r * pitch, cell, cell), 2.5, 2.5)
         p.end()
 
 
@@ -668,14 +675,27 @@ class HeartPanel(QWidget):
             col_labels = [(h, f"{h:02d}") for h in range(0, 24, 3)]
             self._heat.set_grid(grid, row_labels, col_labels)
         else:
-            # 90-day view as a GitHub-style 7 x 13 calendar, newest column last.
+            # Last 91 days as a calendar: columns are Monday-start weeks, rows
+            # are ACTUAL weekdays. The previous version placed day i at row
+            # i % 7, which silently assumed the oldest day was a Monday.
             flat = list(getattr(stats, "daily_heatmap", []) or [])
-            cols = 13
-            cells = flat[-(cols * 7):]
-            cells = [0.0] * (cols * 7 - len(cells)) + cells
-            # daily_heatmap is day-sequential; transpose into row=weekday.
-            grid = [0.0] * (7 * cols)
-            for i, v in enumerate(cells):
-                grid[(i % 7) * cols + (i // 7)] = v
+            n = 91
+            vals = flat[-n:]
+            vals = [0.0] * (n - len(vals)) + vals      # oldest first, today last
+            now = _t.time()
+            grid: dict[tuple[int, int], float] = {}
+            col_labels: list[tuple[int, str]] = []
+            col, last_mon, last_label_col = 0, None, -9
+            for k in range(n):
+                lt = _t.localtime(now - (n - 1 - k) * 86400)
+                if k and lt.tm_wday == 0:
+                    col += 1
+                grid[(lt.tm_wday, col)] = vals[k]
+                if lt.tm_mon != last_mon and col - last_label_col >= 2:
+                    col_labels.append((col, _t.strftime("%b", lt)))
+                    last_label_col = col
+                last_mon = lt.tm_mon
+            cols = col + 1
+            cells = [grid.get((r, c)) for r in range(7) for c in range(cols)]
             self._heat._rows, self._heat._cols = 7, cols
-            self._heat.set_grid(grid, ["Mon", "", "Wed", "", "Fri", "", "Sun"], [])
+            self._heat.set_grid(cells, ["Mon", "", "Wed", "", "Fri", "", "Sun"], col_labels)

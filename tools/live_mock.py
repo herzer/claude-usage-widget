@@ -44,6 +44,9 @@ stats = mock()
 
 osd = UsageOverlay(cfg); osd.update_stats(stats); osd.show()
 panel = HeartPanel(cfg); panel.update_stats(stats); panel.resize(panel.sizeHint())
+# The real app wires this in ClaudeUsageApp._on_panel_appearance; the mock
+# bypasses the app, so it has to make the same connection itself.
+panel.appearanceChanged.connect(osd.set_strip_dark)
 # Park the panel next to the strip, clamped onto the strip's screen -- below
 # it if that fits, otherwise above, never hanging off the bottom edge.
 g = osd.frameGeometry()
