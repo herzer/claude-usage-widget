@@ -72,8 +72,10 @@ VIEW_MODES = (VIEW_MODE_BARS, VIEW_MODE_GAUGE, VIEW_MODE_STRIP)
 STRIP_HEIGHT = 30
 # Ring size is DERIVED from the pill height, not a second constant, so the
 # rings always fill the same proportion of the strip however it is scaled.
-STRIP_RING_FRACTION = 0.66
-STRIP_STROKE_FRACTION = 0.16
+STRIP_RING_FRACTION = 0.70      # ring diameter as a fraction of strip height
+STRIP_STROKE_FRACTION = 0.12    # ring stroke as a fraction of ring diameter
+STRIP_RADIUS_FRACTION = 0.25    # corner radius: a rounded rect, NOT a capsule
+STRIP_MIN_TEXT_PX = 9           # never draw a percentage smaller than this
 # Screen-anchor presets the OSD can snap to. "custom" means use the exact
 # osd_x / osd_y coordinates from config (set when the user drags the widget).
 OSD_POSITION_TOP_LEFT = "top-left"
@@ -106,6 +108,14 @@ SCALE_STEP = 0.1
 # Distance the mouse must move between press and release before a left-click
 # is treated as a drag rather than a click.
 DRAG_THRESHOLD = 5
+
+
+def _strip_font(px: float) -> QFont:
+    """Bold mono at an exact PIXEL size, so strip text scales continuously
+    with the ring instead of stepping through point sizes."""
+    f = _mono_font(10, bold=True)
+    f.setPixelSize(max(1, int(round(px))))
+    return f
 
 
 def _mono_font(size_pt: int, bold: bool = False) -> QFont:
@@ -499,18 +509,53 @@ class UsageOverlay(QWidget):
             dials.append((DIAL_SCOPED, self._scoped_pct))
         return dials
 
-    def _strip_width(self) -> int:
-        """Content-fitted width. The percentage slot is sized for "100%" so
-        the strip never jitters wider and narrower as the numbers change."""
+    def _strip_layout(self):
+        """Every position in the strip, derived from its height; and the
+        total width. BOTH _apply_size and _paint_strip consume this, so the
+        window can never be narrower than what gets painted -- the bug that
+        clipped the third dial's percentage at scale.
+
+        Percentages scale with the ring (pixel size, so they keep growing)
+        and move INSIDE the ring as soon as "100%" -- the widest value, so the
+        layout never flips between 4% and 40% -- fits in its inner diameter
+        at a legible size.
+        """
         from PySide6.QtGui import QFontMetrics
         s = self._scale
-        fm = QFontMetrics(_mono_font(max(8, int(9.5 * s)), bold=True))
-        slot = fm.horizontalAdvance("100%")
-        handle = 22 * s
-        ring_d = STRIP_HEIGHT * s * STRIP_RING_FRACTION
-        per_dial = ring_d + 5 * s + slot + 12 * s
-        n = len(self._strip_dials())
-        return int(handle + n * per_dial - 12 * s + 10 * s)
+        h = STRIP_HEIGHT * s
+        pad = h * 0.22
+        ring_d = h * STRIP_RING_FRACTION
+        stroke = max(2.0, ring_d * STRIP_STROKE_FRACTION)
+        handle_x = pad
+        handle_w = h * 0.22
+
+        in_px = max(STRIP_MIN_TEXT_PX, ring_d * 0.28)
+        out_px = max(STRIP_MIN_TEXT_PX, h * 0.33)
+        f_in, f_out = _strip_font(in_px), _strip_font(out_px)
+        fm_in, fm_out = QFontMetrics(f_in, self), QFontMetrics(f_out, self)
+        inside = fm_in.horizontalAdvance("100%") + 2 * stroke + h * 0.12 <= ring_d
+
+        dials = []
+        x = handle_x + handle_w + h * 0.28
+        for kind, pct in self._strip_dials():
+            d = {"kind": kind, "pct": pct, "ring_x": x, "inside": inside}
+            if inside:
+                d["font"] = f_in
+                x += ring_d + h * 0.30
+            else:
+                d["font"] = f_out
+                d["text_x"] = x + ring_d + h * 0.15
+                x = d["text_x"] + fm_out.horizontalAdvance("100%") + h * 0.35
+            dials.append(d)
+        # drop the trailing inter-dial gap, add the right pad
+        if dials:
+            x -= (h * 0.30 if inside else h * 0.35)
+        width = int(round(x + pad))
+        return {"h": h, "pad": pad, "ring_d": ring_d, "stroke": stroke,
+                "handle_x": handle_x, "dials": dials, "width": width}
+
+    def _strip_width(self) -> int:
+        return self._strip_layout()["width"]
 
     def set_view_mode(self, mode: str) -> None:
         """Switch between bar and gauge rendering; resizes the OSD to match."""
@@ -948,61 +993,59 @@ class UsageOverlay(QWidget):
         self._paint_full(p, w, h)
 
     def _paint_strip(self, p: QPainter, w: int, h: int) -> None:
-        """Menu-bar-height pill: drag handle + three mini dials.
+        """Rounded strip: drag handle + three dials, laid out by _strip_layout.
 
-        Colours come from the panel's paired light/dark tokens, so the strip
-        matches whichever appearance the user picked there. Dial hues are the
-        mid-tone menu-bar set, which clear both grounds.
+        Colours come from the panel's paired light/dark tokens so the strip
+        matches whichever appearance the user picked there; dial hues are the
+        mid-tone menu-bar set that clears both grounds.
         """
         from claude_usage.menubar import _dial_color
         from claude_usage.panel import tokens
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.TextAntialiasing, True)
-        s = self._scale
+        L = self._strip_layout()
         t = tokens(self._strip_dark)
         cy = h / 2
+        s = self._scale
 
-        # Pill.
-        r = QRectF(0.5, 0.5, w - 1, h - 1)
+        # Surface: rounded rectangle. A capsule read as a pill; this reads
+        # as a control.
+        radius = L["h"] * STRIP_RADIUS_FRACTION
         p.setPen(QPen(_hex_to_qcolor(t["card_edge"]), 1))
         p.setBrush(_hex_to_qcolor(t["card"], self._opacity))
-        p.drawRoundedRect(r, h / 2, h / 2)
+        p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), radius, radius)
 
-        # Drag handle: a 2x3 dot grid, the conventional "grab here" glyph.
+        # Drag handle: 2x3 dot grid, scaled with the strip.
         p.setPen(Qt.NoPen)
         p.setBrush(_hex_to_qcolor(t["text_dim"]))
-        hx = 11 * s
+        dot = max(1.0, L["h"] * 0.045)
+        hx = L["handle_x"] + dot
+        step = L["h"] * 0.135
         for col in (0, 1):
             for row in (-1, 0, 1):
-                p.drawEllipse(QPointF(hx + col * 4 * s, cy + row * 4 * s),
-                              1.3 * s, 1.3 * s)
+                p.drawEllipse(QPointF(hx + col * step, cy + row * step), dot, dot)
 
-        # Dials.
-        ring_d = h * STRIP_RING_FRACTION
-        stroke = max(2.0, ring_d * STRIP_STROKE_FRACTION)
-        font = _mono_font(max(8, int(9.5 * s)), bold=True)
-        p.setFont(font)
-        fm = p.fontMetrics()
-        slot = fm.horizontalAdvance("100%")
+        ring_d, stroke = L["ring_d"], L["stroke"]
         track = _hex_to_qcolor(t["track"])
-        x = 22 * s
-        for kind, pct in self._strip_dials():
-            col = _dial_color(pct, self._theme, kind)
-            rect = QRectF(x, cy - ring_d / 2, ring_d, ring_d)
-            pen = QPen(track, stroke)
-            pen.setCapStyle(Qt.FlatCap)
-            p.setPen(pen)
-            p.setBrush(Qt.NoBrush)
+        for d in L["dials"]:
+            pct, col = d["pct"], _dial_color(d["pct"], self._theme, d["kind"])
+            rect = QRectF(d["ring_x"], cy - ring_d / 2, ring_d, ring_d)
+            pen = QPen(track, stroke); pen.setCapStyle(Qt.FlatCap)
+            p.setPen(pen); p.setBrush(Qt.NoBrush)
             p.drawEllipse(rect)
             if pct > 0:
-                pen = QPen(col, stroke)
-                pen.setCapStyle(Qt.RoundCap)
+                pen = QPen(col, stroke); pen.setCapStyle(Qt.RoundCap)
                 p.setPen(pen)
                 p.drawArc(rect, 90 * 16, -int(min(1.0, pct) * 360 * 16))
-            x += ring_d + 5 * s
+            p.setFont(d["font"])
+            fm = p.fontMetrics()
+            text = f"{int(round(pct * 100))}%"
             p.setPen(col)
-            p.drawText(QPointF(x, cy + fm.capHeight() / 2), f"{int(round(pct * 100))}%")
-            x += slot + 12 * s
+            if d["inside"]:
+                tx = rect.center().x() - fm.horizontalAdvance(text) / 2
+            else:
+                tx = d["text_x"]
+            p.drawText(QPointF(tx, cy + fm.capHeight() / 2), text)
 
     def _paint_minimized(self, p: QPainter, w: int, h: int) -> None:
         """Thin capsule showing session utilisation."""
