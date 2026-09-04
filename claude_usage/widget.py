@@ -1068,6 +1068,17 @@ class ClaudeUsageApp(QObject):
                     config,
                     menu=self._context_menu,
                 )
+                # Diagnostic, not debug spam: a tray icon that silently fails
+                # to appear is otherwise indistinguishable from one that was
+                # never constructed, and macOS hides menu-bar overflow without
+                # telling anyone.
+                from PySide6.QtWidgets import QSystemTrayIcon as _QSTI
+                print(
+                    f"claude-usage: menu bar -> available={_QSTI.isSystemTrayAvailable()} "
+                    f"visible={self.menubar.tray.isVisible()} "
+                    f"dials={len(self.menubar._visible_dials())}",
+                    file=sys.stderr,
+                )
             except Exception as exc:
                 print(f"claude-usage: menu-bar indicator unavailable: {exc}",
                       file=sys.stderr)

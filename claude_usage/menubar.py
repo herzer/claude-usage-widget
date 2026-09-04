@@ -58,6 +58,22 @@ IDENTITY_HUES = {
     DIAL_SCOPED: "#a78bfa",    # violet - the model-scoped weekly cap
 }
 
+# Mid-tone variants for the MENU BAR specifically, legible on a light AND a
+# dark bar without knowing which we are on.
+#
+# Detecting that is not actually possible: macOS tints the menu bar from the
+# desktop picture, so a Mac in Light mode routinely has a DARK menu bar, while
+# Qt's colorScheme() only reports the app appearance. Painting near-black text
+# because the system says "Light" is how these dials rendered invisible. These
+# hues clear both grounds, so legibility no longer depends on a guess.
+MENUBAR_HUES = {
+    DIAL_SESSION: "#3d8fd1",
+    DIAL_ALL: "#1fa65a",
+    DIAL_SCOPED: "#7c5cdb",
+}
+MENUBAR_WARN = "#d98a00"
+MENUBAR_CRIT = "#d93a2b"
+
 
 def _dial_color(pct: float, theme: dict[str, str], kind: str) -> QColor:
     """Identity hue below the warn threshold, severity hue above it.
@@ -66,9 +82,11 @@ def _dial_color(pct: float, theme: dict[str, str], kind: str) -> QColor:
     number is unremarkable — but once a cap is actually at risk, "you are
     running out" outranks "which cap this is".
     """
+    if pct >= 0.85:
+        return _hex_to_qcolor(MENUBAR_CRIT)
     if pct >= 0.6:
-        return _bar_color(pct, theme)
-    return _hex_to_qcolor(theme.get(f"dial_{kind}", IDENTITY_HUES[kind]))
+        return _hex_to_qcolor(MENUBAR_WARN)
+    return _hex_to_qcolor(theme.get(f"dial_{kind}", MENUBAR_HUES[kind]))
 
 
 def _pct_text(fraction: float) -> str:
@@ -154,15 +172,16 @@ def render_indicator_pixmap(
     p.setRenderHint(QPainter.TextAntialiasing, True)
     p.setFont(font)
 
-    track = QColor(255, 255, 255, 46) if dark else QColor(0, 0, 0, 38)
-    text_color = QColor("#f2f2f7") if dark else QColor("#1c1c1e")
+    # Neutral mid-grey track: ~equally visible on a light or a dark bar.
+    track = QColor(128, 128, 134, 105)
     cy = BAR_HEIGHT / 2
 
     x = EDGE_PAD
     for (kind, pct), w in zip(values, widths):
-        _draw_dial(p, x + RING_D / 2, cy, pct, track, _dial_color(pct, theme, kind))
+        col = _dial_color(pct, theme, kind)
+        _draw_dial(p, x + RING_D / 2, cy, pct, track, col)
         x += RING_D + LABEL_GAP
-        p.setPen(text_color)
+        p.setPen(col)
         fm = p.fontMetrics()
         # Baseline from the cap-height centre so digits optically centre on
         # the ring, instead of sitting low the way ascent/2 does.
