@@ -486,8 +486,15 @@ class UsageOverlay(QWidget):
                 mask = win.styleMask()
                 if self._view_mode == VIEW_MODE_STRIP and (mask & NSWindowStyleMaskResizable):
                     win.setStyleMask_(mask & ~NSWindowStyleMaskResizable)
-            except Exception:
-                pass
+                    if not getattr(self, "_mask_logged", False):
+                        self._mask_logged = True
+                        print("claude-usage: strip: native resizable mask cleared "
+                              f"(styleMask {mask} -> {win.styleMask()})", file=sys.stderr)
+            except Exception as exc:
+                # Never silent: a failure here means the corner-resize fight
+                # is still live, and nothing else would tell us.
+                print(f"claude-usage: strip: could not clear resizable mask: {exc}",
+                      file=sys.stderr)
             if want:
                 win.setLevel_(NSStatusWindowLevel)
                 # Show on every Space, like the menu bar itself. Qt stamps
