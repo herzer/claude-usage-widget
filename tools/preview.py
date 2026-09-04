@@ -46,9 +46,10 @@ def mock_stats() -> UsageStats:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("out", nargs="?", default="preview.png")
-    ap.add_argument("--view", default="gauge", choices=("gauge", "bars"))
+    ap.add_argument("--view", default="gauge", choices=("gauge", "bars", "strip"))
     ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--theme", default=None)
+    ap.add_argument("--light", action="store_true", help="strip in light appearance")
     ap.add_argument("--popup", action="store_true", help="render the verbose panel instead of the OSD")
     args = ap.parse_args()
 
@@ -58,6 +59,7 @@ def main() -> int:
     cfg["osd_scale"] = args.scale
     cfg["osd_minimized"] = False
     cfg["osd_opacity"] = 1.0
+    cfg["panel_dark"] = not args.light
     if args.theme:
         cfg["theme"] = args.theme
 

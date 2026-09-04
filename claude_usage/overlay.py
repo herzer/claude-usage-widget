@@ -64,7 +64,14 @@ CODEX_GAUGE_ROW_HEIGHT = 118
 # tests don't have to import an enum.
 VIEW_MODE_BARS = "bars"
 VIEW_MODE_GAUGE = "gauge"
-VIEW_MODES = (VIEW_MODE_BARS, VIEW_MODE_GAUGE)
+# "strip": a menu-bar-height pill the widget OWNS -- three mini dials and a
+# drag handle. Built because a real QSystemTrayIcon on macOS can be hidden by
+# notch overflow and cannot know whether the bar it sits on is light or dark.
+VIEW_MODE_STRIP = "strip"
+VIEW_MODES = (VIEW_MODE_BARS, VIEW_MODE_GAUGE, VIEW_MODE_STRIP)
+STRIP_HEIGHT = 30
+STRIP_RING_D = 16
+STRIP_RING_STROKE = 2.6
 # Screen-anchor presets the OSD can snap to. "custom" means use the exact
 # osd_x / osd_y coordinates from config (set when the user drags the widget).
 OSD_POSITION_TOP_LEFT = "top-left"
@@ -212,6 +219,10 @@ class UsageOverlay(QWidget):
         self._scale: float = float(cfg.get("osd_scale", 1.0))
         self._opacity: float = float(cfg.get("osd_opacity", 0.75))
         self._minimized: bool = False
+        # The strip view follows the verbose panel's appearance, not the OSD
+        # theme: it is meant to read like part of the menu bar, and the panel
+        # is where the user chose light or dark.
+        self._strip_dark: bool = bool(cfg.get("panel_dark", True))
 
         # Live stats — updated externally via update_stats()
         self._session_pct: float = 0.0
@@ -385,14 +396,39 @@ class UsageOverlay(QWidget):
             self._ticker_offset = 0.0
         self.update()  # schedule a paintEvent
 
+    def set_strip_dark(self, dark: bool) -> None:
+        """Repaint the strip in the panel's appearance."""
+        self._strip_dark = bool(dark)
+        if self._view_mode == VIEW_MODE_STRIP:
+            self.update()
+
+    def _strip_dials(self) -> list[tuple[str, float]]:
+        from claude_usage.menubar import DIAL_ALL, DIAL_SCOPED, DIAL_SESSION
+        dials = [(DIAL_SESSION, self._session_pct), (DIAL_ALL, self._weekly_pct)]
+        if self._scoped_label:
+            dials.append((DIAL_SCOPED, self._scoped_pct))
+        return dials
+
+    def _strip_width(self) -> int:
+        """Content-fitted width. The percentage slot is sized for "100%" so
+        the strip never jitters wider and narrower as the numbers change."""
+        from PySide6.QtGui import QFontMetrics
+        s = self._scale
+        fm = QFontMetrics(_mono_font(max(8, int(9.5 * s)), bold=True))
+        slot = fm.horizontalAdvance("100%")
+        handle = 22 * s
+        per_dial = STRIP_RING_D * s + 5 * s + slot + 12 * s
+        n = len(self._strip_dials())
+        return int(handle + n * per_dial - 12 * s + 10 * s)
+
     def set_view_mode(self, mode: str) -> None:
         """Switch between bar and gauge rendering; resizes the OSD to match."""
         if mode not in VIEW_MODES or mode == self._view_mode:
             return
         self._view_mode = mode
         self._apply_size()
-        # Gauge view has no ticker — stop the animation to save CPU.
-        if mode == VIEW_MODE_GAUGE:
+        # Gauge and strip views have no ticker — stop the animation to save CPU.
+        if mode in (VIEW_MODE_GAUGE, VIEW_MODE_STRIP):
             self._ticker_timer.stop()
         elif self._ticker_enabled and self._ticker_items and not self._minimized:
             self._ticker_timer.start()
@@ -523,7 +559,10 @@ class UsageOverlay(QWidget):
             return
 
         width = int(BASE_WIDTH * self._scale)
-        if self._view_mode == VIEW_MODE_GAUGE:
+        if self._view_mode == VIEW_MODE_STRIP:
+            width = self._strip_width()
+            base = STRIP_HEIGHT
+        elif self._view_mode == VIEW_MODE_GAUGE:
             base = GAUGE_HEIGHT + (GAUGE_SCOPED_ROW_HEIGHT if self._scoped_label else 0)
             if self._codex_available:
                 base += CODEX_GAUGE_ROW_HEIGHT
@@ -802,11 +841,71 @@ class UsageOverlay(QWidget):
                 import traceback
                 traceback.print_exc()
 
+        if self._view_mode == VIEW_MODE_STRIP:
+            self._paint_strip(p, w, h)
+            return
         if self._view_mode == VIEW_MODE_GAUGE:
             self._paint_gauge(p, w, h)
             return
 
         self._paint_full(p, w, h)
+
+    def _paint_strip(self, p: QPainter, w: int, h: int) -> None:
+        """Menu-bar-height pill: drag handle + three mini dials.
+
+        Colours come from the panel's paired light/dark tokens, so the strip
+        matches whichever appearance the user picked there. Dial hues are the
+        mid-tone menu-bar set, which clear both grounds.
+        """
+        from claude_usage.menubar import _dial_color
+        from claude_usage.panel import tokens
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        s = self._scale
+        t = tokens(self._strip_dark)
+        cy = h / 2
+
+        # Pill.
+        r = QRectF(0.5, 0.5, w - 1, h - 1)
+        p.setPen(QPen(_hex_to_qcolor(t["card_edge"]), 1))
+        p.setBrush(_hex_to_qcolor(t["card"], self._opacity))
+        p.drawRoundedRect(r, h / 2, h / 2)
+
+        # Drag handle: a 2x3 dot grid, the conventional "grab here" glyph.
+        p.setPen(Qt.NoPen)
+        p.setBrush(_hex_to_qcolor(t["text_dim"]))
+        hx = 11 * s
+        for col in (0, 1):
+            for row in (-1, 0, 1):
+                p.drawEllipse(QPointF(hx + col * 4 * s, cy + row * 4 * s),
+                              1.3 * s, 1.3 * s)
+
+        # Dials.
+        ring_d = STRIP_RING_D * s
+        stroke = STRIP_RING_STROKE * s
+        font = _mono_font(max(8, int(9.5 * s)), bold=True)
+        p.setFont(font)
+        fm = p.fontMetrics()
+        slot = fm.horizontalAdvance("100%")
+        track = _hex_to_qcolor(t["track"])
+        x = 22 * s
+        for kind, pct in self._strip_dials():
+            col = _dial_color(pct, self._theme, kind)
+            rect = QRectF(x, cy - ring_d / 2, ring_d, ring_d)
+            pen = QPen(track, stroke)
+            pen.setCapStyle(Qt.FlatCap)
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            p.drawEllipse(rect)
+            if pct > 0:
+                pen = QPen(col, stroke)
+                pen.setCapStyle(Qt.RoundCap)
+                p.setPen(pen)
+                p.drawArc(rect, 90 * 16, -int(min(1.0, pct) * 360 * 16))
+            x += ring_d + 5 * s
+            p.setPen(col)
+            p.drawText(QPointF(x, cy + fm.capHeight() / 2), f"{int(round(pct * 100))}%")
+            x += slot + 12 * s
 
     def _paint_minimized(self, p: QPainter, w: int, h: int) -> None:
         """Thin capsule showing session utilisation."""

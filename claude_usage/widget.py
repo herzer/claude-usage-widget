@@ -1768,6 +1768,7 @@ class ClaudeUsageApp(QObject):
 
     def _on_panel_appearance(self, dark: bool) -> None:
         self.config["panel_dark"] = bool(dark)
+        self.overlay.set_strip_dark(dark)
         self._persist_config()
 
     def _on_overlay_click(self) -> None:
