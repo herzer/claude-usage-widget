@@ -250,14 +250,17 @@ class LimitsCard(Card):
 
     def __init__(self, t: dict[str, str], parent=None) -> None:
         super().__init__(t, parent)
-        self._reset_text = ""
+        self._reset_ts = 0
         self._rows: list[tuple[str, str, float]] = []   # (kind, label, pct)
         self.setMinimumSize(212, 196)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-    def set_values(self, rows, reset_text: str) -> None:
+    def set_values(self, rows, reset_ts: int) -> None:
+        """Takes the raw timestamp, not a formatted string: the card decides
+        the long or short form by measuring, so it never has to parse a
+        label back to shorten it."""
         self._rows = list(rows)
-        self._reset_text = reset_text
+        self._reset_ts = int(reset_ts or 0)
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
@@ -271,12 +274,19 @@ class LimitsCard(Card):
         p.setFont(_font(9.5, QFont.DemiBold, caps=True))
         p.setPen(QColor(t["text_2"]))
         p.drawText(QPointF(x0, CARD_PAD + 10), "7-day limits")
-        if self._reset_text:
+        hdr_end = x0 + p.fontMetrics().horizontalAdvance("7-DAY LIMITS") + 10
+        if self._reset_ts:
+            # Header always wins. Try "Resets Mon 23:38"; if that would run
+            # into the header, fall back to "Mon 23:38"; if even that does
+            # not fit, draw nothing rather than draw a collision.
             p.setFont(_font(10))
-            p.setPen(QColor(t["text_dim"]))
             fm = p.fontMetrics()
-            p.drawText(QPointF(x1 - fm.horizontalAdvance(self._reset_text),
-                               CARD_PAD + 10), self._reset_text)
+            for text in (_fmt_at(self._reset_ts), _fmt_at_short(self._reset_ts)):
+                tw = fm.horizontalAdvance(text)
+                if x1 - tw >= hdr_end:
+                    p.setPen(QColor(t["text_dim"]))
+                    p.drawText(QPointF(x1 - tw, CARD_PAD + 10), text)
+                    break
 
         y = CARD_PAD + 44
         for kind, label, pct in self._rows:
@@ -520,6 +530,14 @@ def _fmt_at(reset_ts: int) -> str:
     return _t.strftime("Resets %a %H:%M", _t.localtime(reset_ts))
 
 
+def _fmt_at_short(reset_ts: int) -> str:
+    """"Thu 05:59" -- for when the long form will not fit."""
+    import time as _t
+    if not reset_ts:
+        return ""
+    return _t.strftime("%a %H:%M", _t.localtime(reset_ts))
+
+
 class HeartPanel(QWidget):
     """The verbose panel: ring card, limits card, activity grid, dial toggles."""
 
@@ -644,8 +662,7 @@ class HeartPanel(QWidget):
         rows = [(DIAL_ALL, "All models", g("weekly_utilization"))]
         if scoped_label:
             rows.append((DIAL_SCOPED, scoped_label, g("scoped_utilization")))
-        self._limits.set_values(
-            rows, _fmt_at(int(getattr(stats, "weekly_reset", 0) or 0)))
+        self._limits.set_values(rows, int(getattr(stats, "weekly_reset", 0) or 0))
 
         # A cold or throttled start has no label yet; show the last one the API
         # gave us rather than the generic word. Still derived FROM the id --
