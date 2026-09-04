@@ -92,6 +92,9 @@ class UsageStats:
     overage_status: str = ""  # "rejected" or "allowed"
     fallback_status: str = ""  # "available" or ""
     rate_limit_error: str = ""  # error message if API call fails
+    # Seconds the server asked us to wait (Retry-After on a 429). 0 = no
+    # explicit instruction; the caller falls back to exponential backoff.
+    retry_after_seconds: float = 0.0
     session_history: list = field(default_factory=list)  # bucketed sparkline (oldest first)
     weekly_history: list = field(default_factory=list)
     # Subscription type from OAuth credentials ("max", "pro", "free", or "" if unknown).
@@ -787,8 +790,15 @@ def _fetch_oauth_usage(token: str) -> dict[str, Any]:
                 # keeps the last-known values instead of blanking the UI.
                 retry_after = _parse_retry_after(e.headers)
                 if not retry_after or retry_after <= 0 or attempt >= _USAGE_MAX_RETRIES:
+                    # Carry Retry-After to the caller. Dropping it was a
+                    # self-sustaining lockout: the poll timer caps its backoff
+                    # at refresh_max_seconds (300 s) while this endpoint hands
+                    # out penalties well past that (647 s observed), so every
+                    # poll landed inside the window, earned a fresh 429, and
+                    # the widget never escaped -- showing 0%/0% indefinitely.
                     return {"error": "Rate limited -- using last known values",
-                            "rate_limited": True}
+                            "rate_limited": True,
+                            "retry_after": float(retry_after or 0.0)}
                 time.sleep(min(retry_after, 5.0))  # cap so a huge Retry-After can't stall the poll
                 continue
             if e.code >= 500 and attempt < _USAGE_MAX_RETRIES:
@@ -1067,6 +1077,7 @@ def collect_all(config: dict[str, Any]) -> UsageStats:
         pass
     elif "error" in rate_limits:
         stats.rate_limit_error = rate_limits["error"]
+        stats.retry_after_seconds = float(rate_limits.get("retry_after", 0.0) or 0.0)
         # API call failed (transient network glitch, OAuth hiccup, etc.).
         # Without this, both utilization fields stay at the dataclass
         # default 0.0 and the widget paints "0% / 0%" until the next

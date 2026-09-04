@@ -1482,3 +1482,55 @@ class TestBurnDetectionWiring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Retry-After propagation — the "permanently 0%/0%" lockout
+# ---------------------------------------------------------------------------
+
+
+class TestRetryAfterPropagation(unittest.TestCase):
+    """A 429 must carry its Retry-After up to the caller.
+
+    Observed live: this endpoint hands out penalties of 647 s while the poll
+    timer capped its own backoff at refresh_max_seconds (300 s). Every poll
+    therefore landed inside the penalty window, earned a fresh 429, and the
+    widget sat at 0%/0% indefinitely — a self-sustaining lockout that looked
+    exactly like an auth failure. The fix is only meaningful if the number
+    actually reaches the timer, so assert on the number, not just the flag.
+    """
+
+    def _http_error(self, code: int, retry_after: str | None = None):
+        from urllib.error import HTTPError
+        hdrs = {"Retry-After": retry_after} if retry_after is not None else {}
+        return HTTPError("https://api", code, "err", hdrs, io.BytesIO(b"{}"))
+
+    def test_large_retry_after_is_returned_to_caller(self) -> None:
+        import claude_usage.collector as c
+
+        def always_429(req, timeout=10, **kw):
+            raise self._http_error(429, retry_after="647")
+
+        with patch.object(c, "urlopen", always_429), \
+             patch.object(c.time, "sleep", lambda s: None):
+            result = _fetch_oauth_usage("valid-token")
+
+        self.assertTrue(result.get("rate_limited"))
+        self.assertEqual(result.get("retry_after"), 647.0)
+
+    def test_absent_retry_after_reports_zero_not_missing(self) -> None:
+        # 0.0 means "no instruction, use exponential backoff" — the key must
+        # still be present so the caller never KeyErrors on the happy path.
+        import claude_usage.collector as c
+
+        def always_429(req, timeout=10, **kw):
+            raise self._http_error(429)
+
+        with patch.object(c, "urlopen", always_429), \
+             patch.object(c.time, "sleep", lambda s: None):
+            result = _fetch_oauth_usage("valid-token")
+
+        self.assertEqual(result.get("retry_after"), 0.0)
+
+    def test_stats_default_retry_after_is_zero(self) -> None:
+        self.assertEqual(UsageStats().retry_after_seconds, 0.0)

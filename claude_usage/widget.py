@@ -1639,7 +1639,14 @@ class ClaudeUsageApp(QObject):
         # the cap) so we stop hammering an endpoint that's already throttling
         # us. setInterval here is safe — this slot runs on the GUI thread.
         if stats.rate_limit_error:
-            next_ms = min(self._timer.interval() * 2, self._max_refresh_ms)
+            retry_after = float(getattr(stats, "retry_after_seconds", 0.0) or 0.0)
+            if retry_after > 0:
+                # The server said exactly how long to wait, so honour it even
+                # when it exceeds refresh_max_seconds. Capping below the
+                # penalty window is what kept this permanently throttled.
+                next_ms = int((retry_after + 5.0) * 1000)
+            else:
+                next_ms = min(self._timer.interval() * 2, self._max_refresh_ms)
         else:
             next_ms = self._base_refresh_ms
         if next_ms != self._timer.interval():
