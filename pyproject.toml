@@ -42,6 +42,11 @@ dependencies = [
 Homepage = "https://github.com/bozdemir/claude-usage-widget"
 Issues = "https://github.com/bozdemir/claude-usage-widget/issues"
 
+[project.optional-dependencies]
+# Strip-in-menu-bar needs the NSWindow level set natively; without it the
+# feature degrades to a warning and the strip stays below the bar.
+menubar = ["pyobjc-framework-Cocoa; sys_platform == 'darwin'"]
+
 [project.scripts]
 claude-usage = "claude_usage.cli:main"
 
