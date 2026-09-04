@@ -537,7 +537,9 @@ class UsageOverlay(QWidget):
         # scroll-to-scale over a 30 px bar has no good place to aim at.
         handle_x = pad
         handle_w = h * 0.22
-        grip_w = h * 0.26
+        # Grip is a square as tall as the dot grid's span (rows at +-0.135h
+        # plus dot radius 0.045h = 0.36h), so the two ends read as mirrors.
+        grip_w = h * 0.36
 
         in_px = max(STRIP_MIN_TEXT_PX, ring_d * 0.28)
         out_px = max(STRIP_MIN_TEXT_PX, h * 0.33)
@@ -566,7 +568,7 @@ class UsageOverlay(QWidget):
         width = int(round(grip_x + grip_w + pad * 0.6))
         return {"h": h, "pad": pad, "ring_d": ring_d, "stroke": stroke,
                 "handle_x": handle_x, "dials": dials, "width": width,
-                "grip": QRectF(grip_x, h * 0.25, grip_w, h * 0.50)}
+                "grip": QRectF(grip_x, (h - grip_w) / 2, grip_w, grip_w)}
 
     def _strip_width(self) -> int:
         return self._strip_layout()["width"]
