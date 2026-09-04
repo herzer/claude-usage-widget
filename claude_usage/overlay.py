@@ -475,6 +475,19 @@ class UsageOverlay(QWidget):
             win = objc.objc_object(c_void_p=int(self.winId())).window()
             if win is None:
                 return
+            # Strip view: drop Cocoa's resizable style mask. A frameless Qt
+            # window still gets NSWindowStyleMaskResizable, which gives it a
+            # NATIVE resize zone at its corners -- exactly where the scale
+            # grip sits. Pressing there started a Cocoa resize that fought
+            # the grip and left the window far larger than the layout
+            # (374x176 against a 219x58 layout, seen live).
+            try:
+                from AppKit import NSWindowStyleMaskResizable
+                mask = win.styleMask()
+                if self._view_mode == VIEW_MODE_STRIP and (mask & NSWindowStyleMaskResizable):
+                    win.setStyleMask_(mask & ~NSWindowStyleMaskResizable)
+            except Exception:
+                pass
             if want:
                 win.setLevel_(NSStatusWindowLevel)
                 # Show on every Space, like the menu bar itself. Qt stamps
@@ -610,6 +623,10 @@ class UsageOverlay(QWidget):
         if mode not in VIEW_MODES or mode == self._view_mode:
             return
         self._view_mode = mode
+        if mode != VIEW_MODE_STRIP:
+            # Leaving the strip: give the size constraints back (QWIDGETSIZE_MAX).
+            self.setMinimumSize(0, 0)
+            self.setMaximumSize(16777215, 16777215)
         self._apply_size()
         self._apply_menubar_level()
         # Gauge and strip views have no ticker — stop the animation to save CPU.
@@ -748,6 +765,9 @@ class UsageOverlay(QWidget):
             width = self._strip_width()
             base = STRIP_HEIGHT
             self._strip_want = (width, int(STRIP_HEIGHT * self._scale))
+            # min == max tells Qt (and through it Cocoa) the window is not
+            # user-resizable. The strip only ever sizes itself.
+            self.setFixedSize(width, int(STRIP_HEIGHT * self._scale))
         elif self._view_mode == VIEW_MODE_GAUGE:
             base = GAUGE_HEIGHT + (GAUGE_SCOPED_ROW_HEIGHT if self._scoped_label else 0)
             if self._codex_available:
@@ -772,7 +792,10 @@ class UsageOverlay(QWidget):
             # returns the stale value -- the visible "glitch".
             anchor = self._scale_anchor if (self._scaling and getattr(self, "_scale_anchor", None) is not None) \
                 else self.frameGeometry().topRight()
-            self.setGeometry(anchor.x() - width, anchor.y(), width, height)
+            # QRect.topRight().x() is the last pixel column, so the right
+            # EDGE is one more. Upstream's resize+move used tr.x() - width
+            # and crept the window 1 px left on every wheel step.
+            self.setGeometry(anchor.x() + 1 - width, anchor.y(), width, height)
         else:
             self.resize(width, height)
         # Strip only: did the native window actually take the size? A
