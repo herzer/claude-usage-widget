@@ -1,6 +1,6 @@
 """Verbose panel, card-based, light + dark.
 
-Replaces the stacked-label popup with the layout Stefanie asked for: a big
+Replaces the stacked-label popup with a card layout: a big
 5-hour ring card beside a 7-day limits card, an activity heatmap with a
 Week/Month switch, and the toggles that decide which dials the menu bar shows.
 

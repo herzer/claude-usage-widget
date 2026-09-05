@@ -12,3 +12,6 @@ _gi_fix/
 dist/
 build/
 *.egg-info/
+
+# Personal pick-up notes (Claude Code reads this; never published)
+CLAUDE.local.md

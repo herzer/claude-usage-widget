@@ -2,9 +2,29 @@
 # Diagnose the widget's plan-data access, then enable login autostart ONLY if
 # it actually works. Safe to re-run.
 
-WIDGET="/Users/herzer/Claude Usage Widget/.venv/bin/claude-usage"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+WIDGET="$ROOT/.venv/bin/claude-usage"
 PLIST="$HOME/Library/LaunchAgents/local.claude-usage-widget.plist"
 LABEL="local.claude-usage-widget"
+
+write_plist() {
+  mkdir -p "$(dirname "$PLIST")"
+  cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>$LABEL</string>
+    <key>ProgramArguments</key><array><string>$WIDGET</string></array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><false/>
+    <key>LimitLoadToSessionType</key><string>Aqua</string>
+    <key>StandardOutPath</key><string>$HOME/Library/Logs/claude-usage-widget.log</string>
+    <key>StandardErrorPath</key><string>$HOME/Library/Logs/claude-usage-widget.log</string>
+</dict>
+</plist>
+EOF
+}
 
 echo "── 1/3  Stored OAuth token ─────────────────────────────"
 /usr/bin/security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null \
@@ -54,6 +74,7 @@ if [ "$OK" -ne 0 ]; then
   exit 1
 fi
 
+write_plist
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
 launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load "$PLIST" 2>/dev/null
 if launchctl list | grep -q "$LABEL"; then

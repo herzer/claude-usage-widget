@@ -3,6 +3,18 @@
 All notable changes to this project are documented here.
 This project follows [semantic versioning](https://semver.org/).
 
+## 0.13.0 — macOS menu-bar edition (fork)
+
+First release of the [herzer/claude-usage-widget](https://github.com/herzer/claude-usage-widget) fork.
+
+- **Strip view**: a menu-bar-height pill with three dials (5-hour, all models, model-scoped weekly), a move handle, and a window-style resize grip; numbers move inside the rings as it grows.
+- **Strip in the menu bar** (`strip_in_menubar`): floats above the macOS menu bar; Top Right parks it in the bar band.
+- **Card-based panel**: 5-hour ring, 7-day limits, Week/Month activity grid from real per-hour data, dial toggles, Light/Dark switch shared with the strip.
+- **Menu-bar tray dials** (`menubar_enabled`, optional): hue is the label, legible on light and dark bars.
+- **Honors `Retry-After`** on 429 instead of capping backoff below the penalty window (previously a self-sustaining lockout).
+- **Expired-token refresh** via the CLI on 401; the AI weekly summary can be disabled (`weekly_report_enabled`).
+- Update checks point at this fork's releases; Homebrew formula removed (install from source).
+
 ## 0.12.5
 
 ### Fixed

@@ -4,7 +4,8 @@
 # Order matters: the widget rewrites config on exit, so it must die first.
 
 CFG="$HOME/.config/claude-usage/config.json"
-WIDGET="/Users/herzer/Claude Usage Widget/.venv/bin/claude-usage"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+WIDGET="$ROOT/.venv/bin/claude-usage"
 
 echo "Quitting the running widget..."
 # Match only the Python process, NOT any shell whose command line merely
