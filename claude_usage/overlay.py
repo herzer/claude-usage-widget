@@ -613,6 +613,26 @@ class UsageOverlay(QWidget):
             return False
         return self._strip_layout()["grip"].adjusted(-3, -3, 3, 3).contains(local_pos)
 
+    def _request_scale(self, new_scale: float) -> None:
+        """Coalesce scale changes to one geometry update per ~frame.
+
+        A setGeometry per mouse pixel on a translucent frameless window
+        reallocates the backing store every time -- that was the flicker.
+        Mouse moves can arrive faster than the display can show them; the
+        timer applies only the latest value.
+        """
+        self._pending_scale = new_scale
+        if not getattr(self, "_scale_timer_armed", False):
+            self._scale_timer_armed = True
+            QTimer.singleShot(16, self._flush_scale)
+
+    def _flush_scale(self) -> None:
+        self._scale_timer_armed = False
+        pending = getattr(self, "_pending_scale", None)
+        if pending is not None:
+            self._pending_scale = None
+            self._set_scale(pending)
+
     def _set_scale(self, new_scale: float) -> None:
         """Apply a scale (clamped) exactly the way the wheel does."""
         new_scale = max(SCALE_MIN, min(SCALE_MAX, new_scale))
@@ -942,6 +962,7 @@ class UsageOverlay(QWidget):
             # frameGeometry() per step, which can lag a resize on macOS and
             # feed back into the next step.
             self._scale_anchor = self.frameGeometry().topRight()
+            self._scale_size0 = (self.width(), self.height())
             self._press_pos = None          # not a move, not a click
             return
         if event.button() == Qt.LeftButton:
@@ -955,11 +976,15 @@ class UsageOverlay(QWidget):
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._scaling and self._scale_press is not None:
             d = event.globalPosition().toPoint() - self._scale_press
-            # Right or down grows, left or up shrinks -- the bottom-right
-            # resize convention. In menu-bar mode the right edge is pinned
-            # to the screen, so growth shows as the strip extending left;
-            # the mapping stays the conventional one regardless.
-            self._set_scale(self._scale_start + (d.x() + d.y()) / 150.0)
+            # 1:1 corner tracking: the grip is the bottom-right corner and the
+            # top-right is anchored, so the bottom edge must follow the
+            # pointer exactly. Target height = start height + vertical drag;
+            # horizontal drag is folded in through the aspect ratio so a
+            # diagonal pull feels natural. Scale is DERIVED from that height
+            # -- the old "(dx+dy)/150" let the pointer run away from the grip.
+            w0, h0 = self._scale_size0
+            dy = d.y() + d.x() * (h0 / max(1, w0))
+            self._request_scale((h0 + dy) / STRIP_HEIGHT)
             return
         if self._press_pos is None:
             # Hover: advertise the grip.
@@ -980,6 +1005,7 @@ class UsageOverlay(QWidget):
         if event.button() != Qt.LeftButton:
             return
         if self._scaling:
+            self._flush_scale()                 # apply the last pending value
             self._scaling = False
             self._scale_press = None
             self._scale_anchor = None
