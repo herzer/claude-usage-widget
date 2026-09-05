@@ -216,6 +216,8 @@ class UsageOverlay(QWidget):
     # Emitted when the scroll-wheel changes the scale factor — controller
     # persists it so the OSD reopens at the same zoom.
     scaledTo = Signal(float)
+    # Strip view: user-chosen width (0 = fit content); persisted like the scale.
+    stripWidthChanged = Signal(int)
     # Emitted when the minimized state flips — controller persists it.
     minimizedChanged = Signal(bool)
 
@@ -243,6 +245,7 @@ class UsageOverlay(QWidget):
         # parked in the bar band. See DEFAULT_CONFIG for why it is off by
         # default.
         self._strip_in_menubar: bool = bool(cfg.get("strip_in_menubar", False))
+        self._strip_width_pref: int = int(cfg.get("osd_strip_width", 0) or 0)
         self._menubar_level_warned: bool = False
         # Scale-grip drag state (strip view). Kept separate from the move
         # drag so a grip press can never also start a move.
@@ -539,65 +542,78 @@ class UsageOverlay(QWidget):
             dials.append((DIAL_SCOPED, self._scoped_pct))
         return dials
 
-    def _strip_layout(self):
-        """Every position in the strip, derived from its height; and the
-        total width. BOTH _apply_size and _paint_strip consume this, so the
-        window can never be narrower than what gets painted -- the bug that
-        clipped the third dial's percentage at scale.
+    def _strip_mirrored(self) -> bool:
+        """True when the strip is anchored at its RIGHT edge.
 
-        Percentages scale with the ring (pixel size, so they keep growing)
-        and move INSIDE the ring as soon as "100%" -- the widest value, so the
-        layout never flips between 4% and 40% -- fits in its inner diameter
-        at a legible size.
+        Then the free corner is bottom-LEFT, so that is where the scale grip
+        lives and the move handle goes to the right end. A window's resize
+        grip is always the corner opposite the fixed one; putting it on the
+        pinned edge is why the pointer could never stay on it.
+        """
+        if self._position in (OSD_POSITION_TOP_RIGHT, OSD_POSITION_BOTTOM_RIGHT):
+            return True
+        if self._position in (OSD_POSITION_TOP_LEFT, OSD_POSITION_BOTTOM_LEFT):
+            return False
+        scr = QApplication.primaryScreen()
+        return bool(scr) and self.frameGeometry().center().x() > scr.geometry().center().x()
+
+    def _strip_layout(self, width: int | None = None):
+        """Every position in the strip for a given width, plus min/actual width.
+
+        Height drives the dials (scale); width is FREE -- at least the
+        content-fitted minimum, and any extra is spread into the gaps so the
+        dials reflow like a toolbar. Both _apply_size and _paint_strip
+        consume this, so window and paint can never disagree.
         """
         from PySide6.QtGui import QFontMetrics
         s = self._scale
         h = STRIP_HEIGHT * s
         ring_d = h * STRIP_RING_FRACTION
         stroke = max(2.0, ring_d * STRIP_STROKE_FRACTION)
-        # Handles are chrome, not content: they keep a FIXED size at every
-        # scale, and only the dials grow. Move handle (2x3 dots) on the left
-        # edge, centred; scale grip (triangular dots) in the bottom-right
-        # corner, like a window's resize grip.
-        edge = STRIP_EDGE
-        dot, step = STRIP_DOT_R, STRIP_DOT_STEP
-        handle_x = edge
-        handle_w = step + 2 * dot            # two dot columns
-        grip_w = 2 * step + 2 * dot          # 3x3 lattice
-        pad = edge
+        edge, dot, step = STRIP_EDGE, STRIP_DOT_R, STRIP_DOT_STEP
+        handle_w = step + 2 * dot
+        grip_w = 2 * step + 2 * dot
 
         in_px = max(STRIP_MIN_TEXT_PX, ring_d * 0.28)
         out_px = max(STRIP_MIN_TEXT_PX, h * 0.33)
         f_in, f_out = _strip_font(in_px), _strip_font(out_px)
         fm_in, fm_out = QFontMetrics(f_in, self), QFontMetrics(f_out, self)
-        # Fits when the widest value clears the INNER diameter with a hair of
-        # margin. A generous margin here is why it never moved inside at 3x.
-        inside = fm_in.horizontalAdvance("100%") + h * 0.04 <= ring_d - 2 * stroke
+        inside = fm_in.horizontalAdvance("100%") + 2 * stroke + h * 0.04 <= ring_d
 
+        src = self._strip_dials()
+        n = len(src)
+        dial_w = ring_d if inside else ring_d + h * 0.15 + fm_out.horizontalAdvance("100%")
+        gap = h * 0.30 if inside else h * 0.35
+        content = n * dial_w + max(0, n - 1) * gap
+        lead = edge + handle_w + h * 0.28
+        trail = h * 0.20 + grip_w + edge
+        min_width = int(round(lead + content + trail))
+        W = max(min_width, int(width or 0))
+        extra = max(0, W - min_width)
+        gap_extra = extra / n if n else 0.0      # n-1 inter-dial gaps + the trailing one
+
+        mirrored = self._strip_mirrored()
+        if mirrored:                              # grip left, handle right
+            grip_x, handle_x = edge, W - edge - handle_w
+            x = edge + grip_w + h * 0.20
+        else:                                     # handle left, grip right
+            handle_x, grip_x = edge, W - edge - grip_w
+            x = lead
         dials = []
-        x = handle_x + handle_w + h * 0.28
-        for kind, pct in self._strip_dials():
-            d = {"kind": kind, "pct": pct, "ring_x": x, "inside": inside}
-            if inside:
-                d["font"] = f_in
-                x += ring_d + h * 0.30
-            else:
-                d["font"] = f_out
+        for kind, pct in src:
+            d = {"kind": kind, "pct": pct, "inside": inside,
+                 "font": f_in if inside else f_out, "ring_x": x}
+            if not inside:
                 d["text_x"] = x + ring_d + h * 0.15
-                x = d["text_x"] + fm_out.horizontalAdvance("100%") + h * 0.35
             dials.append(d)
-        # drop the trailing inter-dial gap, add the right pad
-        if dials:
-            x -= (h * 0.30 if inside else h * 0.35)
-        grip_x = x + h * 0.20
-        width = int(round(grip_x + grip_w + edge))
-        return {"h": h, "pad": pad, "ring_d": ring_d, "stroke": stroke,
-                "handle_x": handle_x, "dials": dials, "width": width,
-                "dot": dot, "step": step,
+            x += dial_w + gap + gap_extra
+        return {"h": h, "ring_d": ring_d, "stroke": stroke, "handle_x": handle_x,
+                "dials": dials, "min_width": min_width, "width": W,
+                "dot": dot, "step": step, "mirrored": mirrored,
                 "grip": QRectF(grip_x, h - edge * 0.6 - grip_w, grip_w, grip_w)}
 
     def _strip_width(self) -> int:
-        return self._strip_layout()["width"]
+        return self._strip_layout(self._strip_width_pref)["width"]
 
     def _strip_diag_ok(self) -> bool:
         """At most one strip diagnostic per second, so a drag does not spam."""
@@ -613,25 +629,29 @@ class UsageOverlay(QWidget):
             return False
         return self._strip_layout()["grip"].adjusted(-3, -3, 3, 3).contains(local_pos)
 
-    def _request_scale(self, new_scale: float) -> None:
-        """Coalesce scale changes to one geometry update per ~frame.
-
-        A setGeometry per mouse pixel on a translucent frameless window
-        reallocates the backing store every time -- that was the flicker.
-        Mouse moves can arrive faster than the display can show them; the
-        timer applies only the latest value.
-        """
-        self._pending_scale = new_scale
+    def _request_strip_size(self, width: float, height: float) -> None:
+        """Coalesce resize steps to one geometry change per ~frame. A
+        setGeometry per mouse pixel on a translucent window reallocates the
+        backing store each time -- that was the flicker."""
+        self._pending_size = (width, height)
         if not getattr(self, "_scale_timer_armed", False):
             self._scale_timer_armed = True
             QTimer.singleShot(16, self._flush_scale)
 
     def _flush_scale(self) -> None:
         self._scale_timer_armed = False
-        pending = getattr(self, "_pending_scale", None)
-        if pending is not None:
-            self._pending_scale = None
-            self._set_scale(pending)
+        pending = getattr(self, "_pending_size", None)
+        if pending is None:
+            return
+        self._pending_size = None
+        width, height = pending
+        self._strip_width_pref = max(0, int(round(width)))
+        self._scale = max(SCALE_MIN, min(SCALE_MAX, height / STRIP_HEIGHT))
+        self._apply_size()
+        self.update()
+        if self._position == OSD_POSITION_CUSTOM:
+            tl = self.frameGeometry().topLeft()
+            self._custom_xy = (tl.x(), tl.y())
 
     def _set_scale(self, new_scale: float) -> None:
         """Apply a scale (clamped) exactly the way the wheel does."""
@@ -816,12 +836,15 @@ class UsageOverlay(QWidget):
             # resize followed by a move: on macOS that pair paints as two
             # frames per mouse pixel, and reading geometry back between them
             # returns the stale value -- the visible "glitch".
-            anchor = self._scale_anchor if (self._scaling and getattr(self, "_scale_anchor", None) is not None) \
-                else self.frameGeometry().topRight()
-            # QRect.topRight().x() is the last pixel column, so the right
-            # EDGE is one more. Upstream's resize+move used tr.x() - width
-            # and crept the window 1 px left on every wheel step.
-            self.setGeometry(anchor.x() + 1 - width, anchor.y(), width, height)
+            dragging = self._scaling and getattr(self, "_scale_anchor", None) is not None
+            if self._view_mode == VIEW_MODE_STRIP and not self._strip_mirrored():
+                a = self._scale_anchor if dragging else self.frameGeometry().topLeft()
+                self.setGeometry(a.x(), a.y(), width, height)             # top-LEFT fixed
+            else:
+                # QRect.topRight().x() is the last pixel column; the edge is
+                # one more. Upstream's tr.x() - width crept 1 px per step.
+                a = self._scale_anchor if dragging else self.frameGeometry().topRight()
+                self.setGeometry(a.x() + 1 - width, a.y(), width, height) # top-RIGHT fixed
         else:
             self.resize(width, height)
         if self._view_mode == VIEW_MODE_STRIP:
@@ -968,7 +991,8 @@ class UsageOverlay(QWidget):
             # Fixed anchor for the whole drag. _apply_size re-reads
             # frameGeometry() per step, which can lag a resize on macOS and
             # feed back into the next step.
-            self._scale_anchor = self.frameGeometry().topRight()
+            fg = self.frameGeometry()
+            self._scale_anchor = fg.topRight() if self._strip_mirrored() else fg.topLeft()
             self._scale_size0 = (self.width(), self.height())
             self._press_pos = None          # not a move, not a click
             return
@@ -989,14 +1013,20 @@ class UsageOverlay(QWidget):
             # horizontal drag is folded in through the aspect ratio so a
             # diagonal pull feels natural. Scale is DERIVED from that height
             # -- the old "(dx+dy)/150" let the pointer run away from the grip.
+            # Exactly a window resize: the grabbed corner follows the pointer
+            # in both axes, the opposite corner stays put. Height sets the
+            # scale; width is free (content reflows) down to its minimum,
+            # where the corner stops -- a window's minimum size.
             w0, h0 = self._scale_size0
-            dy = d.y() + d.x() * (h0 / max(1, w0))
-            self._request_scale((h0 + dy) / STRIP_HEIGHT)
+            dx = -d.x() if self._strip_mirrored() else d.x()   # left grip: left = wider
+            self._request_strip_size(w0 + dx, h0 + d.y())
             return
         if self._press_pos is None:
             # Hover: advertise the grip.
-            self.setCursor(Qt.SizeFDiagCursor if self._on_scale_grip(event.position())
-                           else Qt.ArrowCursor)
+            if self._on_scale_grip(event.position()):
+                self.setCursor(Qt.SizeBDiagCursor if self._strip_mirrored() else Qt.SizeFDiagCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
             return
         delta = event.globalPosition().toPoint() - self._press_pos
         if not self._dragging and (abs(delta.x()) > DRAG_THRESHOLD or abs(delta.y()) > DRAG_THRESHOLD):
@@ -1016,7 +1046,13 @@ class UsageOverlay(QWidget):
             self._scaling = False
             self._scale_press = None
             self._scale_anchor = None
-            self.scaledTo.emit(self._scale)     # persist once, not per pixel
+            # Persist once. A width at or below the content minimum is
+            # stored as 0 ("fit"), so a later change in dial count does not
+            # leave the strip stuck at an old minimum.
+            L = self._strip_layout(self._strip_width_pref)
+            self._strip_width_pref = 0 if self._strip_width_pref <= L["min_width"] else L["width"]
+            self.scaledTo.emit(self._scale)
+            self.stripWidthChanged.emit(self._strip_width_pref)
             return
         if self._press_pos is not None and not self._dragging:
             # Check if click landed on the news strip (bottom NEWS_STRIP_HEIGHT px).
@@ -1145,56 +1181,41 @@ class UsageOverlay(QWidget):
         self._paint_full(p, w, h)
 
     def _paint_strip(self, p: QPainter, w: int, h: int) -> None:
-        """Rounded strip: drag handle + three dials, laid out by _strip_layout.
-
-        Colours come from the panel's paired light/dark tokens so the strip
-        matches whichever appearance the user picked there; dial hues are the
-        mid-tone menu-bar set that clears both grounds.
-        """
+        """Rounded strip: move handle at one end, scale grip at the free
+        corner, dials reflowing across the width. Colours come from the
+        panel's paired light/dark tokens."""
         from claude_usage.menubar import _dial_color
         from claude_usage.panel import tokens
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.TextAntialiasing, True)
-        L = self._strip_layout()
+        L = self._strip_layout(w)
         t = tokens(self._strip_dark)
-        # Centre on the LAYOUT height, never the window's. If the two ever
-        # disagree (seen on device), the rings, dots and grip must still
-        # share one centre line -- splitting them is how the grip floated
-        # away from the dials.
         cy = L["h"] / 2
-        s = self._scale
         if abs(h - L["h"]) > 1 and self._strip_diag_ok():
             import sys
             print(f"claude-usage: strip paint: window {w}x{h} but layout "
                   f"{L['width']}x{L['h']:.0f} scale={self._scale:.2f}", file=sys.stderr)
 
-        # Surface: rounded rectangle. A capsule read as a pill; this reads
-        # as a control.
         radius = L["h"] * STRIP_RADIUS_FRACTION
         p.setPen(QPen(_hex_to_qcolor(t["card_edge"]), 1))
         p.setBrush(_hex_to_qcolor(t["card"], self._opacity))
         p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), radius, radius)
 
-        # Move handle: 2x3 dot grid, fixed size, centred on the left edge.
-        p.setPen(Qt.NoPen)
-        p.setBrush(_hex_to_qcolor(t["text_dim"]))
+        dim = _hex_to_qcolor(t["text_dim"])
         dot, step = L["dot"], L["step"]
+        p.setPen(Qt.NoPen)
+        p.setBrush(dim)
+        # Move handle: 2x3 dots, fixed size, centred vertically.
         hx = L["handle_x"] + dot
         for col in (0, 1):
             for row in (-1, 0, 1):
                 p.drawEllipse(QPointF(hx + col * step, cy + row * step), dot, dot)
-
-        # Scale grip (right end): the classic triangular dot grip -- rows of
-        # 1, 2, 3 dots filling the lower-right corner. Same dots and spacing
-        # as the move handle, so the two ends speak one language while the
-        # shapes stay distinct. Drag right/down to grow, left/up to shrink.
+        # Scale grip: triangular dots filling the corner it sits in.
         g = L["grip"]
-        p.setPen(Qt.NoPen)
-        p.setBrush(_hex_to_qcolor(t["text_dim"]))
-        ox = g.left() + dot                 # 3x3 lattice filling the grip square
-        oy = g.top() + dot
+        ox, oy = g.left() + dot, g.top() + dot
         for r in range(3):
-            for c in range(2 - r, 3):
+            cols = range(0, r + 1) if L["mirrored"] else range(2 - r, 3)
+            for c in cols:
                 p.drawEllipse(QPointF(ox + c * step, oy + r * step), dot, dot)
 
         ring_d, stroke = L["ring_d"], L["stroke"]
@@ -1209,14 +1230,10 @@ class UsageOverlay(QWidget):
                 pen = QPen(col, stroke); pen.setCapStyle(Qt.RoundCap)
                 p.setPen(pen)
                 p.drawArc(rect, 90 * 16, -int(min(1.0, pct) * 360 * 16))
-            p.setFont(d["font"])
-            fm = p.fontMetrics()
+            p.setFont(d["font"]); fm = p.fontMetrics()
             text = f"{int(round(pct * 100))}%"
             p.setPen(col)
-            if d["inside"]:
-                tx = rect.center().x() - fm.horizontalAdvance(text) / 2
-            else:
-                tx = d["text_x"]
+            tx = rect.center().x() - fm.horizontalAdvance(text) / 2 if d["inside"] else d["text_x"]
             p.drawText(QPointF(tx, cy + fm.capHeight() / 2), text)
 
     def _paint_minimized(self, p: QPainter, w: int, h: int) -> None:

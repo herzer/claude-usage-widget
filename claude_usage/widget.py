@@ -1128,6 +1128,7 @@ class ClaudeUsageApp(QObject):
         self.overlay.rightClicked.connect(self._on_overlay_right_click)
         self.overlay.movedTo.connect(self._on_overlay_moved)
         self.overlay.scaledTo.connect(self._on_overlay_scaled)
+        self.overlay.stripWidthChanged.connect(self._on_strip_width_changed)
         self.overlay.minimizedChanged.connect(self._on_overlay_minimized_changed)
         self.stats_ready.connect(self._apply_stats)
         self.update_available.connect(self._on_update_available)
@@ -1760,6 +1761,10 @@ class ClaudeUsageApp(QObject):
             })
 
     # -------------------------------------------------------------- slots
+
+    def _on_strip_width_changed(self, width: int) -> None:
+        self.config["osd_strip_width"] = int(width)
+        self._persist_config()
 
     def _on_dial_toggled(self, kind: str, on: bool) -> None:
         """Persist one menu-bar dial toggle and repaint the indicator."""

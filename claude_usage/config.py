@@ -116,6 +116,8 @@ DEFAULT_CONFIG: Config = {
     # default because it floats OVER real status items rather than among
     # them -- it will cover whatever it is dragged onto and does not reflow.
     "strip_in_menubar": False,
+    # Strip width chosen by dragging its grip; 0 = fit the content.
+    "osd_strip_width": 0,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"
