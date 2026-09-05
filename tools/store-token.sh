@@ -11,6 +11,7 @@
 # writes the middle one, in upstream's own format, so no widget code changes.
 set -e
 F="$HOME/.claude/.credentials.json"
+DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1   # validate a paste; write nothing, request nothing
 
 printf "Paste the token from 'claude setup-token' (input hidden): "
 # A terminal paste of a long token often arrives wrapped across several
@@ -19,7 +20,8 @@ printf "Paste the token from 'claude setup-token' (input hidden): "
 # first line, then keep collecting for as long as more input keeps
 # arriving, and strip every whitespace character before validating.
 IFS= read -rs TOK
-while IFS= read -rs -t 0.5 MORE; do TOK="$TOK$MORE"; done
+# Integer timeout: macOS ships bash 3.2, which rejects fractional -t.
+while IFS= read -rs -t 1 MORE; do TOK="$TOK$MORE"; done
 echo
 TOK="${TOK//[[:space:]]/}"
 case "$TOK" in
@@ -30,6 +32,11 @@ if [ "${#TOK}" -lt 90 ]; then
   echo "Token is only ${#TOK} characters -- that is a fragment, not a token. Nothing written."
   echo "Copy the whole line from 'claude setup-token' and paste it in one go."
   exit 1
+fi
+
+if [ "$DRY" = 1 ]; then
+  echo "dry run: token looks valid (${#TOK} characters after joining the paste). Nothing written."
+  unset TOK; exit 0
 fi
 
 umask 077
