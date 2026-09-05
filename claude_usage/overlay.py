@@ -794,7 +794,6 @@ class UsageOverlay(QWidget):
             self._strip_want = (width, int(STRIP_HEIGHT * self._scale))
             # min == max tells Qt (and through it Cocoa) the window is not
             # user-resizable. The strip only ever sizes itself.
-            self.setFixedSize(width, int(STRIP_HEIGHT * self._scale))
         elif self._view_mode == VIEW_MODE_GAUGE:
             base = GAUGE_HEIGHT + (GAUGE_SCOPED_ROW_HEIGHT if self._scoped_label else 0)
             if self._codex_available:
@@ -825,6 +824,14 @@ class UsageOverlay(QWidget):
             self.setGeometry(anchor.x() + 1 - width, anchor.y(), width, height)
         else:
             self.resize(width, height)
+        if self._view_mode == VIEW_MODE_STRIP:
+            # Pin min == max AFTER the geometry change, so Qt never re-adds
+            # Cocoa's resizable mask -- and without a second native resize:
+            # setFixedSize before setGeometry was two resizes per step,
+            # which is flicker. Equal min/max on the current size moves
+            # nothing.
+            self.setMinimumSize(width, height)
+            self.setMaximumSize(width, height)
         # Strip only: did the native window actually take the size? A
         # disagreement here is the on-device "tall box, small dials" bug.
         want = getattr(self, "_strip_want", None)
