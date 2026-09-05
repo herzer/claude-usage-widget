@@ -1,6 +1,6 @@
 # Claude Usage Widget — macOS menu-bar edition
 
-**By Stefanie Herzer, at heART.**
+**By Stefanie Herzer, at [heART](https://heartapps.app).**
 
 A small always-on desktop widget that shows your **Claude Code plan usage** — the 5-hour session limit, the 7-day limit, and the per-model weekly cap — as three dials in a strip that can live *in* your macOS menu bar, with a card-based panel one click away.
 
@@ -96,4 +96,4 @@ The live mock exists because look-and-feel rounds must not cost polls on a rate-
 
 ## Credits and license
 
-The menu-bar edition is by **Stefanie Herzer** at **heART**, built on [claude-usage-widget](https://github.com/bozdemir/claude-usage-widget) by Burak Özdemir, MIT. This fork is MIT as well — see [LICENSE](LICENSE). Not affiliated with Anthropic.
+The menu-bar edition is by **Stefanie Herzer** at [**heART**](https://heartapps.app), built on [claude-usage-widget](https://github.com/bozdemir/claude-usage-widget) by Burak Özdemir, MIT. This fork is MIT as well — see [LICENSE](LICENSE). Not affiliated with Anthropic.
