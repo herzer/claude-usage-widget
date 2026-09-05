@@ -13,11 +13,24 @@ set -e
 F="$HOME/.claude/.credentials.json"
 
 printf "Paste the token from 'claude setup-token' (input hidden): "
-IFS= read -rs TOK; echo
+# A terminal paste of a long token often arrives wrapped across several
+# lines. A plain read stops at the first newline, stores a TRUNCATED token
+# and lets the remainder spill into the shell as commands. So: take the
+# first line, then keep collecting for as long as more input keeps
+# arriving, and strip every whitespace character before validating.
+IFS= read -rs TOK
+while IFS= read -rs -t 0.5 MORE; do TOK="$TOK$MORE"; done
+echo
+TOK="${TOK//[[:space:]]/}"
 case "$TOK" in
   sk-ant-oat*) ;;
   *) echo "That does not look like a Claude OAuth token (expected sk-ant-oat...). Nothing written."; exit 1 ;;
 esac
+if [ "${#TOK}" -lt 90 ]; then
+  echo "Token is only ${#TOK} characters -- that is a fragment, not a token. Nothing written."
+  echo "Copy the whole line from 'claude setup-token' and paste it in one go."
+  exit 1
+fi
 
 umask 077
 # Token travels over stdin only -- never argv (visible in ps) or the environment.
