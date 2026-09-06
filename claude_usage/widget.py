@@ -1719,6 +1719,16 @@ class ClaudeUsageApp(QObject):
             self.menubar.update_stats(stats)
         self._update_link(stats.rate_limit_error or "",
                           float(getattr(stats, "retry_after_seconds", 0.0) or 0.0))
+        # One line per poll. A widget whose whole job is to be current must
+        # never fail quietly: without this, "no fresh sample" was
+        # indistinguishable from "not polling at all".
+        import sys as _sys
+        _err = stats.rate_limit_error or ""
+        print(f"claude-usage: poll {_t.strftime('%H:%M:%S')} "
+              f"{'ERROR ' + _err if _err else 'ok'} "
+              f"session={stats.session_utilization:.2f} weekly={stats.weekly_utilization:.2f} "
+              f"retry_after={getattr(stats, 'retry_after_seconds', 0.0)} "
+              f"next_poll_in={self._timer.interval() / 1000:.0f}s", file=_sys.stderr, flush=True)
         self.notifier.check_stats(stats)
 
         # Real-time burn/spike/retry-storm — debounced once-per-episode desktop
