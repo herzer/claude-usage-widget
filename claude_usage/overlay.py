@@ -927,6 +927,15 @@ class UsageOverlay(QWidget):
             # frames per mouse pixel, and reading geometry back between them
             # returns the stale value -- the visible "glitch".
             dragging = self._scaling and getattr(self, "_scale_anchor", None) is not None
+            if self._view_mode == VIEW_MODE_STRIP:
+                # Release the pin from the previous call FIRST. Qt clamps
+                # setGeometry to min/max, so leaving min == max from the last
+                # size silently froze the strip at whatever size it already
+                # had -- resizing died after a single step. The offscreen
+                # platform does not enforce constraints, which is why the
+                # repro passed while the real window would not budge.
+                self.setMinimumSize(0, 0)
+                self.setMaximumSize(16777215, 16777215)
             if self._view_mode == VIEW_MODE_STRIP and not self._strip_mirrored():
                 a = self._scale_anchor if dragging else self.frameGeometry().topLeft()
                 self.setGeometry(a.x(), a.y(), width, height)             # top-LEFT fixed
@@ -938,11 +947,9 @@ class UsageOverlay(QWidget):
         else:
             self.resize(width, height)
         if self._view_mode == VIEW_MODE_STRIP:
-            # Pin min == max AFTER the geometry change, so Qt never re-adds
-            # Cocoa's resizable mask -- and without a second native resize:
-            # setFixedSize before setGeometry was two resizes per step,
-            # which is flicker. Equal min/max on the current size moves
-            # nothing.
+            # Re-pin to the size we just set, so Qt never re-adds Cocoa's
+            # resizable mask. Safe only because the pin is released again at
+            # the top of the next call.
             self.setMinimumSize(width, height)
             self.setMaximumSize(width, height)
         # Strip only: did the native window actually take the size? A

@@ -117,3 +117,24 @@ class TestPersistenceIsNotHijacked(unittest.TestCase):
         # The guard lives in _persist_config; assert the contract it reads.
         cfg = {"config_path": ""}
         self.assertEqual(cfg.get("config_path"), "")
+
+
+class TestStripStaysResizable(unittest.TestCase):
+    """The strip pins min == max so Qt cannot re-add Cocoa's resizable mask.
+    That pin must be RELEASED before the next setGeometry, or Qt clamps the
+    new size to the old one and the strip freezes -- which is exactly what
+    happened on device while the offscreen repro passed, because the
+    offscreen platform does not enforce size constraints."""
+
+    def test_apply_size_releases_the_pin_before_setting_geometry(self):
+        import inspect
+        from claude_usage import overlay
+        src = inspect.getsource(overlay.UsageOverlay._apply_size)
+        release = src.index("setMaximumSize(16777215")
+        pin = src.index("setMaximumSize(width, height)")
+        self.assertLess(release, pin,
+                        "the pin must be released before it is re-applied")
+        geo = src.index("setGeometry(")
+        self.assertLess(release, geo,
+                        "the pin must be released BEFORE setGeometry, or the "
+                        "new size is clamped to the old one")
