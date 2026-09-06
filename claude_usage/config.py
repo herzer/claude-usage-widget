@@ -38,7 +38,10 @@ DEFAULT_CONFIG: Config = {
     # Base poll interval (seconds): how often the widget refreshes usage.
     # 60 s keeps the data fresh while staying well under the /api/oauth/usage
     # budget (a low-volume endpoint shared with Claude Code).
-    "refresh_seconds": 60,
+    # 60 s was too aggressive for /api/oauth/usage: observed live, a poll
+    # every minute alternates success and 429 indefinitely. Three minutes
+    # keeps the numbers current enough to pace a budget without tripping it.
+    "refresh_seconds": 180,
 
     # Which providers to collect. "claude" is always the primary; add "codex"
     # to also poll the local OpenAI Codex CLI (`codex app-server`) and show
@@ -52,7 +55,9 @@ DEFAULT_CONFIG: Config = {
     # Max poll interval (seconds) the adaptive backoff climbs to when the API
     # rate-limits/errors; it snaps back to refresh_seconds on the next clean
     # refresh.
-    "refresh_max_seconds": 300,
+    # Well above the penalties this endpoint hands out, so a backoff can
+    # actually outlast one instead of re-entering the window.
+    "refresh_max_seconds": 1800,
 
     # Optional path to a JSON file a Claude Code statusLine command dumps its
     # rate-limit payload to ({"captured_at": iso, "rate_limits": {"five_hour":
