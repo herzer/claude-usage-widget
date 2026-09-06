@@ -23,6 +23,8 @@ from claude_usage.config import load_config, user_config_path
 # Holds the QLockFile for the GUI's single-instance guard; assigned in
 # _launch_gui and kept alive for the process lifetime.
 _instance_lock = None
+# How long a starting copy waits for a shutting-down one to release the lock.
+_INSTANCE_LOCK_WAIT_MS = 5000
 
 
 def _instance_lock_path() -> str:
@@ -294,7 +296,14 @@ def _launch_gui() -> None:
     # hence the module-level reference.
     global _instance_lock
     _instance_lock = QLockFile(_instance_lock_path())
-    if not _instance_lock.tryLock(100):
+    # Wait out a predecessor that is still shutting down. 100 ms was not
+    # enough: `launchctl kickstart -k` SIGTERMs the old process and starts
+    # the new one at once, so the new copy saw the lock still held, exited 0
+    # as "already running", and launchd (KeepAlive false) was left with
+    # NOTHING running -- a restart that silently killed the widget. A Qt
+    # shutdown takes well under a second; five is generous either way, and
+    # costs nothing on a genuine double-launch, which is a background exit.
+    if not _instance_lock.tryLock(_INSTANCE_LOCK_WAIT_MS):
         print("claude-usage is already running; exiting.", file=sys.stderr)
         sys.exit(0)
 

@@ -17,7 +17,8 @@ write_plist() {
     <key>Label</key><string>$LABEL</string>
     <key>ProgramArguments</key><array><string>$WIDGET</string></array>
     <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><false/>
+    <!-- Revive a crash, honour a Quit: restart only on a non-zero exit. -->
+    <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
     <key>LimitLoadToSessionType</key><string>Aqua</string>
     <key>StandardOutPath</key><string>$HOME/Library/Logs/claude-usage-widget.log</string>
     <key>StandardErrorPath</key><string>$HOME/Library/Logs/claude-usage-widget.log</string>

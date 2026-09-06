@@ -57,6 +57,9 @@ Failed polls keep the last known numbers on screen, so the surfaces must say whe
 
 ## The widget vanished
 
+**A restart can leave nothing running (fixed in 0.13.3).** `launchctl kickstart -k` SIGTERMs the old process and starts the new one immediately. The new copy took the single-instance lock with a 100 ms timeout, so if the old one had not finished shutting down it printed "already running", exited 0, and launchd — with `KeepAlive` false — was left with no process at all. The lock now waits five seconds for a predecessor, and the LaunchAgent uses `KeepAlive { SuccessfulExit: false }`, which revives a crash while still honoring a deliberate Quit. Symptom to recognize: `launchctl list | grep claude-usage` shows `-` instead of a PID, and `last exit code = 0` with nothing in the log.
+
+
 - **It died with the shell that launched it.** `--detach` still leaves it in the launching process tree; a Claude Code restart takes it down. `./setup-autostart.sh` hands it to launchd, which is the fix.
 - **It is on another display, minimized, or off the visible area.** `./unhide-widget.sh` quits it, resets position and minimize state, and relaunches. The saved position is clamped onto the primary screen at startup, so a plain restart also rescues it.
 - **`pgrep -f` says it is running when it is not.** Any shell whose command line *quotes* the pattern matches. Decide by executable: `basename "$(ps -o comm= -p $pid)"` is `Python` for the real widget — note that `ps -o comm=` returns a full path on macOS.

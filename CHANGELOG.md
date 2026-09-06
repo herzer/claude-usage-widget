@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 This project follows [semantic versioning](https://semver.org/).
 
+## 0.13.3 — restart without a Terminal, and a restart that survives
+
+- **Restart widget** in the right-click menu, and `tools/make-restart-app.py` builds a double-clickable "Restart Claude Usage.app" for when it is not running.
+- **Fixed: a restart could leave nothing running.** The single-instance lock waited only 100 ms, so a `kickstart` race made the new copy exit as "already running" while launchd kept no process. It now waits five seconds for a predecessor.
+- **The LaunchAgent revives a crash** (`KeepAlive { SuccessfulExit: false }`) while a deliberate Quit still stays quit.
+
 ## 0.13.2 — strip appearance is a choice
 
 - Background opacity per appearance (`strip_bg_opacity_dark` / `_light`), **100 by default** — upstream's 0.75 `osd_opacity` had leaked into the strip. It affects only the background and border; dials, numbers and handles are always solid.

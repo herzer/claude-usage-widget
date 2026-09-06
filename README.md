@@ -34,6 +34,12 @@ python3 -m venv .venv
 
 Put `.venv/bin/claude-usage` on your `PATH` (a symlink into `~/.local/bin` works) and it is just `claude-usage`.
 
+**Restarting it.** Right-click the widget and choose **Restart widget** — no Terminal. For when it is not running at all, build a double-clickable restarter once and keep it in your Dock:
+
+```bash
+.venv/bin/python tools/make-restart-app.py ~/Applications
+```
+
 **Start at login:** `./setup-autostart.sh` writes and loads a LaunchAgent — and refuses to, until it has seen your plan data actually flow, so you never autostart a widget that shows nothing. This also keeps the widget alive when the shell that launched it exits.
 
 ## Using it
@@ -44,7 +50,7 @@ Put `.venv/bin/claude-usage` on your `PATH` (a symlink into `~/.local/bin` works
 | Drag the dot handle (or anywhere on it) | Move |
 | Drag the corner grip | Resize — exactly like a window |
 | Scroll over it | Scale in steps |
-| Right-click | Menu: view (Bars / Gauge / Strip), position, opacity, theme, *Strip in menu bar*, always on top, quit |
+| Right-click | Menu: view (Bars / Gauge / Strip), position, opacity, theme, *Strip in menu bar*, always on top, **restart**, quit |
 
 In the panel: **Week / Month** switches the activity grid; the **Light / Dark** button restyles the panel *and* the strip; the checkboxes at the bottom choose which dials the optional menu-bar tray icon shows. **Strip appearance** at the bottom tunes background opacity and contrast for the appearance the panel is showing — click ± (hold to repeat) or scroll over the value. Transparency is off unless you turn it on, and it only ever affects the background and border.
 
