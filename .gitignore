@@ -15,3 +15,6 @@ build/
 
 # Personal pick-up notes (Claude Code reads this; never published)
 CLAUDE.local.md
+
+# Built by tools/make-restart-app.py; not part of the source
+Restart Claude Usage.app/

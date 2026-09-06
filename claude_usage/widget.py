@@ -1352,6 +1352,10 @@ class ClaudeUsageApp(QObject):
         self._act_version.setEnabled(False)
         m.addAction(self._act_version)
 
+        act_restart = QAction("↻  Restart widget", m)
+        act_restart.triggered.connect(self._on_restart)
+        m.addAction(act_restart)
+
         act_quit = QAction("⏻  Quit", m)
         act_quit.triggered.connect(self._on_quit)
         m.addAction(act_quit)
@@ -1927,6 +1931,59 @@ class ClaudeUsageApp(QObject):
                 f"Claude Usage {tag} available",
                 "Update with: pip install --upgrade claude-usage-widget",
             )
+
+    def _on_restart(self) -> None:
+        """Restart the widget in place, with no Terminal involved.
+
+        Two paths, because the widget can be owned by launchd or not:
+
+        * Under launchd, ``launchctl kickstart -k`` stops and relaunches it
+          in one command -- launchd owns the process, so re-execing
+          ourselves would leave it with a stale child.
+        * Otherwise we spawn a helper that WAITS for this process to die
+          before starting a fresh one. Starting it immediately would hit
+          the single-instance lock and the new copy would exit at once,
+          leaving nothing running.
+        """
+        import os
+        import subprocess
+        import sys
+
+        label = "local.claude-usage-widget"
+        if sys.platform == "darwin":
+            target = f"gui/{os.getuid()}/{label}"
+            try:
+                loaded = subprocess.run(["launchctl", "print", target],
+                                        capture_output=True, timeout=5).returncode == 0
+                if loaded:
+                    subprocess.Popen(["launchctl", "kickstart", "-k", target],
+                                     stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL,
+                                     start_new_session=True)
+                    return          # launchd sends us SIGTERM and starts a fresh copy
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+        # Not launchd-owned: hand off to a helper, then quit.
+        log_path = os.path.expanduser("~/.cache/claude-usage/widget.log")
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        except OSError:
+            log_path = os.devnull
+        wait_then_start = (
+            f'while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.2; done; '
+            f'exec "$@" >> "{log_path}" 2>&1'
+        )
+        try:
+            subprocess.Popen(
+                ["/bin/sh", "-c", wait_then_start, "sh",
+                 sys.executable, "-m", "claude_usage"],
+                stdin=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"claude-usage: restart failed: {exc}", file=sys.stderr)
+            return
+        self._on_quit()
 
     def _on_quit(self) -> None:
         self._alive = False
