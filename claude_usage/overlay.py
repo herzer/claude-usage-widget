@@ -247,6 +247,12 @@ class UsageOverlay(QWidget):
         self._strip_in_menubar: bool = bool(cfg.get("strip_in_menubar", False))
         self._strip_width_pref: int = int(cfg.get("osd_strip_width", 0) or 0)
         self._link = None            # LinkState; None until the app pushes one
+        # Which dials the strip draws. Same keys the tray uses, so one set of
+        # checkboxes governs both surfaces -- they used to reach only the
+        # tray, which meant toggling them changed nothing when the tray was
+        # off and the strip was what the user was looking at.
+        from claude_usage.menubar import DIAL_CONFIG_KEYS as _DCK
+        self._dial_visible = {k: bool(cfg.get(v, True)) for k, v in _DCK.items()}
         # Strip appearance (see DEFAULT_CONFIG). Kept per appearance so a
         # value tuned for a dark desktop does not wreck the light one.
         self._strip_style = {
@@ -546,12 +552,24 @@ class UsageOverlay(QWidget):
         super().showEvent(event)
         self._apply_menubar_level()
 
+    def set_dial_visible(self, kind: str, visible: bool) -> None:
+        """Show or hide one dial in the strip (same toggles as the tray)."""
+        if kind not in self._dial_visible:
+            return
+        self._dial_visible[kind] = bool(visible)
+        if self._view_mode == VIEW_MODE_STRIP and not self._minimized:
+            self._apply_size()
+        self.update()
+
     def _strip_dials(self) -> list[tuple[str, float]]:
         from claude_usage.menubar import DIAL_ALL, DIAL_SCOPED, DIAL_SESSION
-        dials = [(DIAL_SESSION, self._session_pct), (DIAL_ALL, self._weekly_pct)]
+        candidates = [(DIAL_SESSION, self._session_pct), (DIAL_ALL, self._weekly_pct)]
         if self._scoped_label:
-            dials.append((DIAL_SCOPED, self._scoped_pct))
-        return dials
+            candidates.append((DIAL_SCOPED, self._scoped_pct))
+        dials = [(k, v) for k, v in candidates if self._dial_visible.get(k, True)]
+        # Never render an empty pill: if every dial is hidden, show them all
+        # rather than a bar of handles with nothing in it.
+        return dials or candidates
 
     def set_strip_style(self, dark: bool, bg_opacity: int | None = None,
                         contrast: int | None = None, hover_solid: bool | None = None) -> None:

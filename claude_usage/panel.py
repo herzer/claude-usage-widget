@@ -685,18 +685,29 @@ class DialToggles(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(16)
-        cap = QLabel("Menu bar")
+        # Not "Menu bar": these govern the strip AND the tray icon, and the
+        # strip is what most people are looking at.
+        cap = QLabel("Show dials")
         cap.setObjectName("cap")
         lay.addWidget(cap)
         for kind in DIAL_ORDER:
             cb = CheckBox(DIAL_LABELS[kind],
                           bool(config.get(DIAL_CONFIG_KEYS[kind], True)),
                           t, accent=t["accent_" + kind])
-            cb.toggled.connect(lambda on, k=kind: self.toggled.emit(k, on))
+            cb.toggled.connect(lambda on, k=kind: self._on_toggle(k, on))
             self._boxes[kind] = cb
             lay.addWidget(cb)
         lay.addStretch(1)
         self.set_tokens(t)
+
+    def _on_toggle(self, kind: str, on: bool) -> None:
+        """Refuse to switch off the last visible dial -- an empty strip is
+        not a state anyone wants, and it looks like a failure."""
+        if not on and not any(cb.isChecked() for k, cb in self._boxes.items()
+                              if cb.isEnabled()):
+            self._boxes[kind].setChecked(True)
+            return
+        self.toggled.emit(kind, on)
 
     def set_scoped_label(self, label: str) -> None:
         """Rename the scoped checkbox to the cap the API is reporting.

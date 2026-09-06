@@ -1824,6 +1824,7 @@ class ClaudeUsageApp(QObject):
         if not key:
             return
         self.config[key] = bool(on)
+        self.overlay.set_dial_visible(kind, bool(on))     # the strip, too
         if self.menubar is not None:
             self.menubar.set_config(self.config)
         self._persist_config()
