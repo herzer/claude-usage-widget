@@ -3,6 +3,11 @@
 All notable changes to this project are documented here.
 This project follows [semantic versioning](https://semver.org/).
 
+## 0.13.4 — a real check mark, and the app is called Claude Usage
+
+- **Checkboxes draw an actual tick.** Qt cannot put a glyph in `QCheckBox::indicator` without shipping an image, so the styled indicator was only ever a coloured block that read as a swatch. The panel now uses a painted checkbox whose tick colour is chosen by luminance, so it stays legible on green, blue or violet.
+- **macOS calls it "Claude Usage", not "Python"** — in the menu bar, the app switcher and Force Quit. `CFBundleName` is set before Qt connects to the window server; patching afterwards is too late, because Launch Services has already registered the process.
+
 ## 0.13.3 — restart without a Terminal, and a restart that survives
 
 - **Restart widget** in the right-click menu, and `tools/make-restart-app.py` builds a double-clickable "Restart Claude Usage.app" for when it is not running.

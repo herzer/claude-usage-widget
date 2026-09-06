@@ -22,6 +22,7 @@ from claude_usage.config import load_config, user_config_path
 
 # Holds the QLockFile for the GUI's single-instance guard; assigned in
 # _launch_gui and kept alive for the process lifetime.
+APP_DISPLAY_NAME = "Claude Usage"
 _instance_lock = None
 # How long a starting copy waits for a shutting-down one to release the lock.
 _INSTANCE_LOCK_WAIT_MS = 5000
@@ -257,6 +258,29 @@ def _detach_into_background() -> None:
     os._exit(0)
 
 
+def _name_the_app_for_macos() -> None:
+    """Make macOS call this "Claude Usage" instead of "Python".
+
+    Qt's setApplicationName does not reach the macOS menu bar, the app
+    switcher or Force Quit: those read CFBundleName from the running
+    bundle, which for a plain interpreter is the interpreter itself. With
+    PyObjC available we rewrite that key in the main bundle's info
+    dictionary in memory. Best effort -- without PyObjC the app simply
+    keeps the old name, which is cosmetic.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        from Foundation import NSBundle
+        bundle = NSBundle.mainBundle()
+        info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+        if info is not None:
+            info["CFBundleName"] = APP_DISPLAY_NAME
+            info["CFBundleDisplayName"] = APP_DISPLAY_NAME
+    except Exception:
+        pass
+
+
 def _print_qt_install_hint(exc: Exception) -> None:
     """Print install instructions for Qt's xcb platform plugin runtime deps."""
     print(
@@ -283,6 +307,12 @@ def _launch_gui() -> None:
     # the standard X11 positioning semantics our OSD relies on.
     if sys.platform.startswith("linux"):
         os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+
+    # BEFORE any Qt import: Launch Services reads CFBundleName when the
+    # process first connects to the window server, which Qt does during
+    # QApplication construction. Patching afterwards is too late -- the app
+    # stays registered as "Python".
+    _name_the_app_for_macos()
 
     from PySide6.QtCore import Qt, QLockFile
     from PySide6.QtWidgets import QApplication
@@ -316,7 +346,9 @@ def _launch_gui() -> None:
 
     # Hint to window managers that this is a utility/panel process — some
     # WMs use this to decide whether to show a dock icon.
-    app.setApplicationName("claude-usage")
+    app.setApplicationName(APP_DISPLAY_NAME)
+    app.setApplicationDisplayName(APP_DISPLAY_NAME)
+    app.setOrganizationName("heART")
     app.setDesktopFileName("claude-usage")
     app.setQuitOnLastWindowClosed(False)
 

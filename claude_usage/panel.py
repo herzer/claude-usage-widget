@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
-    QColor, QFont, QLinearGradient, QPainter, QPaintEvent, QPen,
+    QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPaintEvent, QPen,
 )
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton,
@@ -451,6 +451,114 @@ class Segmented(QWidget):
         """)
 
 
+class CheckBox(QWidget):
+    """Checkbox with an actual check mark.
+
+    Qt stylesheets cannot draw a glyph into ``QCheckBox::indicator`` without
+    shipping an image, so a styled indicator is only ever a coloured block --
+    which is what this replaced: a green square that read as a swatch, not
+    as "on". This paints the box and a real tick, in a colour chosen for
+    contrast against the fill.
+    """
+
+    toggled = Signal(bool)
+
+    BOX = 14
+    GAP = 7
+
+    def __init__(self, text: str, checked: bool, t: dict[str, str],
+                 accent: str | None = None, parent=None) -> None:
+        super().__init__(parent)
+        self._text = text
+        self._checked = bool(checked)
+        self._t = t
+        self._accent = accent
+        self._enabled = True
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(CONTROL_H_SM)
+        self.setFocusPolicy(Qt.NoFocus)
+
+    # -- state ---------------------------------------------------------
+    def isChecked(self) -> bool:
+        return self._checked
+
+    def setChecked(self, on: bool, emit: bool = False) -> None:
+        on = bool(on)
+        if on == self._checked:
+            return
+        self._checked = on
+        self.update()
+        if emit:
+            self.toggled.emit(on)
+
+    def setText(self, text: str) -> None:
+        self._text = text
+        self.updateGeometry()
+        self.update()
+
+    def setEnabled(self, on: bool) -> None:      # noqa: N802 (Qt casing)
+        self._enabled = bool(on)
+        super().setEnabled(bool(on))
+        self.update()
+
+    def set_tokens(self, t: dict[str, str]) -> None:
+        self._t = t
+        self.update()
+
+    def set_accent(self, accent: str) -> None:
+        self._accent = accent
+        self.update()
+
+    # -- behaviour -----------------------------------------------------
+    def mousePressEvent(self, event) -> None:
+        if self._enabled and event.button() == Qt.LeftButton:
+            self._checked = not self._checked
+            self.update()
+            self.toggled.emit(self._checked)
+
+    def sizeHint(self):
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QFontMetrics
+        fm = QFontMetrics(_font(11, QFont.Medium), self)
+        return QSize(self.BOX + self.GAP + fm.horizontalAdvance(self._text), CONTROL_H_SM)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        t = self._t
+        accent = QColor(self._accent or t["accent_" + DIAL_ALL])
+        y = (self.height() - self.BOX) / 2
+        box = QRectF(0.5, y + 0.5, self.BOX - 1, self.BOX - 1)
+
+        if not self._enabled:
+            p.setPen(QPen(QColor(t["track"]), 1.5)); p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(box, 4, 4)
+        elif self._checked:
+            p.setPen(QPen(accent, 1.5)); p.setBrush(accent)
+            p.drawRoundedRect(box, 4, 4)
+            # Tick colour by luminance, so it stays legible on green or violet.
+            lum = 0.299 * accent.red() + 0.587 * accent.green() + 0.114 * accent.blue()
+            pen = QPen(QColor("#14141a") if lum > 150 else QColor("#ffffff"), 2.0)
+            pen.setCapStyle(Qt.RoundCap); pen.setJoinStyle(Qt.RoundJoin)
+            p.setPen(pen)
+            path = QPainterPath()
+            path.moveTo(box.left() + box.width() * 0.24, box.top() + box.height() * 0.52)
+            path.lineTo(box.left() + box.width() * 0.43, box.top() + box.height() * 0.72)
+            path.lineTo(box.left() + box.width() * 0.78, box.top() + box.height() * 0.30)
+            p.strokePath(path, pen)
+        else:
+            p.setPen(QPen(QColor(t["track"]), 1.5)); p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(box, 4, 4)
+
+        p.setFont(_font(11, QFont.Medium))
+        p.setPen(QColor(t["text_dim"] if not self._enabled else t["text_2"]))
+        fm = p.fontMetrics()
+        p.drawText(QPointF(self.BOX + self.GAP,
+                           self.height() / 2 + fm.capHeight() / 2), self._text)
+        p.end()
+
+
 class Stepper(QWidget):
     """The house stepper: ``− value +`` in one rounded field, value in
     italic. Click ± (hold to repeat), or scroll over it. It replaces the
@@ -535,9 +643,8 @@ class AppearanceZone(QWidget):
         lay.setVerticalSpacing(6)
         self._bg = Stepper(100, 0, 100, 5, " %", t)
         self._ct = Stepper(50, 0, 100, 5, "", t)
-        self._hover = QCheckBox("Solid while the pointer is over it")
-        self._hover.setFixedHeight(CONTROL_H_SM)
-        self._hover.setCursor(Qt.PointingHandCursor)
+        self._hover = CheckBox("Solid while the pointer is over it",
+                               bool(config.get("strip_hover_solid", True)), t)
         for col, (label, w) in enumerate((("Background", self._bg), ("Contrast", self._ct))):
             lab = QLabel(label); lab.setObjectName("cap")
             lay.addWidget(lab, 0, col * 2, Qt.AlignVCenter)
@@ -556,20 +663,14 @@ class AppearanceZone(QWidget):
         suffix = "dark" if dark else "light"
         self._bg.set_value(int(self._config.get(f"strip_bg_opacity_{suffix}", 100) or 100), emit=False)
         self._ct.set_value(int(self._config.get(f"strip_contrast_{suffix}", 50) or 0), emit=False)
-        self._hover.blockSignals(True)
         self._hover.setChecked(bool(self._config.get("strip_hover_solid", True)))
-        self._hover.blockSignals(False)
 
     def set_tokens(self, t: dict[str, str]) -> None:
         for w in (self._bg, self._ct):
             w.set_tokens(t)
-        self.setStyleSheet(f"""
-            QLabel#cap {{ color: {t['text_dim']}; font-size: 11px; font-weight: 600; }}
-            QCheckBox {{ color: {t['text_2']}; font-size: 11px; spacing: 6px; }}
-            QCheckBox::indicator {{ width: 12px; height: 12px; border-radius: 4px;
-                border: 1.5px solid {t['track']}; background: transparent; }}
-            QCheckBox::indicator:checked {{ background: {t['accent_' + DIAL_ALL]}; border-color: {t['accent_' + DIAL_ALL]}; }}
-        """)
+        self._hover.set_tokens(t)
+        self.setStyleSheet(
+            f"QLabel#cap {{ color: {t['text_dim']}; font-size: 11px; font-weight: 600; }}")
 
 
 class DialToggles(QWidget):
@@ -588,10 +689,9 @@ class DialToggles(QWidget):
         cap.setObjectName("cap")
         lay.addWidget(cap)
         for kind in DIAL_ORDER:
-            cb = QCheckBox(DIAL_LABELS[kind])
-            cb.setChecked(bool(config.get(DIAL_CONFIG_KEYS[kind], True)))
-            cb.setFixedHeight(CONTROL_H_SM)
-            cb.setCursor(Qt.PointingHandCursor)
+            cb = CheckBox(DIAL_LABELS[kind],
+                          bool(config.get(DIAL_CONFIG_KEYS[kind], True)),
+                          t, accent=t["accent_" + kind])
             cb.toggled.connect(lambda on, k=kind: self.toggled.emit(k, on))
             self._boxes[kind] = cb
             lay.addWidget(cb)
@@ -611,22 +711,11 @@ class DialToggles(QWidget):
 
     def set_tokens(self, t: dict[str, str]) -> None:
         self._t = t
-        dots = "".join(
-            f"""QCheckBox#dial_{k}::indicator:checked {{ background: {t['accent_' + k]};
-                 border-color: {t['accent_' + k]}; }}"""
-            for k in DIAL_ORDER)
         for k, cb in self._boxes.items():
-            cb.setObjectName(f"dial_{k}")
-        self.setStyleSheet(f"""
-            QLabel#cap {{ color: {t['text_dim']}; font-size: 11px; font-weight: 600; }}
-            QCheckBox {{ color: {t['text_2']}; font-size: 11px; spacing: 6px; }}
-            QCheckBox:disabled {{ color: {t['text_dim']}; }}
-            QCheckBox::indicator {{
-                width: 12px; height: 12px; border-radius: 4px;
-                border: 1.5px solid {t['track']}; background: transparent;
-            }}
-            {dots}
-        """)
+            cb.set_tokens(t)
+            cb.set_accent(t["accent_" + k])
+        self.setStyleSheet(
+            f"QLabel#cap {{ color: {t['text_dim']}; font-size: 11px; font-weight: 600; }}")
 
 
 
