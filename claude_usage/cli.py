@@ -258,6 +258,60 @@ def _detach_into_background() -> None:
     os._exit(0)
 
 
+def _app_icon_path() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", "appicon.png")
+
+
+def _apply_app_icon(app) -> None:
+    """Give the process our own icon instead of the interpreter's rocket.
+
+    Two calls, because they cover different surfaces. setWindowIcon covers
+    Linux and window decorations; on macOS Qt documents that it does NOT
+    touch the Dock -- the Dock tile comes from the bundle, which for a plain
+    interpreter is Python's. Verified by dumping the running app's icon: it
+    was still the rocket. NSApp.setApplicationIconImage_ replaces the tile
+    at runtime, which is the only way short of shipping a real .app.
+    """
+    png = _app_icon_path()
+    if not os.path.isfile(png):
+        return
+    try:
+        from PySide6.QtGui import QIcon
+        app.setWindowIcon(QIcon(png))
+    except Exception:
+        pass
+    if sys.platform != "darwin":
+        return
+    try:
+        from AppKit import NSApplication, NSImage
+        image = NSImage.alloc().initWithContentsOfFile_(png)
+        if image is not None:
+            NSApplication.sharedApplication().setApplicationIconImage_(image)
+    except Exception:
+        pass
+
+
+def _apply_macos_activation_policy(dock_icon: bool) -> None:
+    """Menu-bar utility, not a windowed app.
+
+    Without this the widget sits in the Dock and the app switcher wearing
+    the interpreter's rocket, because a Dock tile comes from the bundle and
+    ours is Python's. Accessory policy removes it entirely, which is what
+    every other menu-bar utility does and what the strip already implies.
+    Panels and menus still open and take focus under this policy.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        from AppKit import (NSApplication, NSApplicationActivationPolicyAccessory,
+                            NSApplicationActivationPolicyRegular)
+        NSApplication.sharedApplication().setActivationPolicy_(
+            NSApplicationActivationPolicyRegular if dock_icon
+            else NSApplicationActivationPolicyAccessory)
+    except Exception:
+        pass
+
+
 def _name_the_app_for_macos() -> None:
     """Make macOS call this "Claude Usage" instead of "Python".
 
@@ -346,6 +400,7 @@ def _launch_gui() -> None:
 
     # Hint to window managers that this is a utility/panel process — some
     # WMs use this to decide whether to show a dock icon.
+    _apply_app_icon(app)
     app.setApplicationName(APP_DISPLAY_NAME)
     app.setApplicationDisplayName(APP_DISPLAY_NAME)
     app.setOrganizationName("heART")
@@ -353,6 +408,9 @@ def _launch_gui() -> None:
     app.setQuitOnLastWindowClosed(False)
 
     config = load_config(_default_config_path())
+    # After the config is loaded, and after QApplication exists: NSApp must
+    # be real before its activation policy can be set.
+    _apply_macos_activation_policy(bool(config.get("macos_dock_icon", False)))
     _controller = ClaudeUsageApp(config)  # keep a reference
     _ = _controller  # suppress unused-var warnings; QApplication holds ownership
     sys.exit(app.exec())

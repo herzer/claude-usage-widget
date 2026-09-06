@@ -140,6 +140,11 @@ DEFAULT_CONFIG: Config = {
     # Which end the strip's scale grip sits on. Stored so dragging the strip
     # never swaps the handles; a corner preset is the only thing that sets it.
     "strip_handles_mirrored": None,
+    # macOS: keep the widget out of the Dock and the app switcher, the way
+    # every other menu-bar utility does. Its UI is the strip, and a Dock tile
+    # for a process launched from an interpreter shows Python's icon anyway.
+    # Set true to get a regular app with a Dock icon.
+    "macos_dock_icon": False,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"

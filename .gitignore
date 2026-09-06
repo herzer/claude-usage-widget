@@ -18,3 +18,7 @@ CLAUDE.local.md
 
 # Built by tools/make-restart-app.py; not part of the source
 Restart Claude Usage.app/
+
+# Intermediate for iconutil; the .icns and .png are committed
+*.iconset/
+Claude Usage.app/

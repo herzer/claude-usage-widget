@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 This project follows [semantic versioning](https://semver.org/).
 
+## 0.14.0 — an app icon, and a proper launcher
+
+- **An app icon**: one progress ring sweeping through the three dial hues — blue for the 5-hour window, green for all models, violet for the model-scoped cap. Drawn natively at every size by `tools/make-icon.py`, so it stays legible at 16 px, and built into a macOS `.icns`.
+- **`tools/make-app.py` builds "Claude Usage.app"** — double-click to start the widget, or restart it if it is already running. It carries the icon and opens no Terminal.
+- **The widget is a menu-bar utility now**: no Dock tile and no app-switcher entry (`macos_dock_icon` to opt back in). This also ends the Python rocket in the Dock — a Dock tile comes from the bundle, and for a process launched from an interpreter that bundle is Python's.
+
 ## 0.13.5 — the toggles work, and the handles stop flipping
 
 - **The dial checkboxes control the strip**, not only the tray icon. With the tray off they had no visible effect at all, and the row was labelled "Menu bar" while the strip ignored it. It now reads "Show dials" and governs both surfaces; the last visible dial cannot be switched off.

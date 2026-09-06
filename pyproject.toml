@@ -60,4 +60,4 @@ include = ["claude_usage*"]
 version = { attr = "claude_usage.__version__" }
 
 [tool.setuptools.package-data]
-claude_usage = ["py.typed", "icons/*.svg"]
+claude_usage = ["py.typed", "icons/*.svg", "icons/*.png", "icons/*.icns"]

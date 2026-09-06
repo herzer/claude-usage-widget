@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Build 'Restart Claude Usage.app' -- a double-clickable restarter.
+"""Build 'Claude Usage.app' -- a double-clickable launcher.
 
-The right-click menu can restart the widget while it is running; this is for
-when it is not, or when you would rather click an icon. No Terminal window
-opens: a .app bundle whose executable is a shell script runs headless.
+Double-click it to start the widget, or to restart it if it is already
+running -- the same thing the right-click menu's Restart does, for when
+there is no widget on screen to right-click. No Terminal window opens: a
+.app bundle whose executable is a shell script runs headless.
 
-    python3 tools/make-restart-app.py [destination-folder]
+    .venv/bin/python tools/make-restart-app.py [destination-folder]
 
-Then drag the app to your Dock. It is safe to run twice.
+Then drag it to your Dock. Safe to run twice; run make-icon.py first so
+the bundle gets the app icon.
 """
 import os
+import shutil
 import stat
+import subprocess
 import sys
 
-NAME = "Restart Claude Usage"
+NAME = "Claude Usage"
 LABEL = "local.claude-usage-widget"
 
 INFO = """<?xml version="1.0" encoding="UTF-8"?>
@@ -27,6 +31,7 @@ INFO = """<?xml version="1.0" encoding="UTF-8"?>
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleExecutable</key><string>restart</string>
+    <key>CFBundleIconFile</key><string>icon</string>
     <!-- Agent: no Dock icon, no menu bar, no window -- it just acts and exits. -->
     <key>LSUIElement</key><true/>
 </dict>
@@ -73,12 +78,23 @@ def main() -> int:
 
     with open(os.path.join(app, "Contents", "Info.plist"), "w") as fh:
         fh.write(INFO.format(name=NAME))
+    icns = os.path.join(root, "claude_usage", "icons", "ClaudeUsage.icns")
+    if os.path.isfile(icns):
+        res = os.path.join(app, "Contents", "Resources")
+        os.makedirs(res, exist_ok=True)
+        shutil.copyfile(icns, os.path.join(res, "icon.icns"))
+    else:
+        print("  no icon yet -- run tools/make-icon.py first", file=sys.stderr)
+
     exe = os.path.join(macos, "restart")
     with open(exe, "w") as fh:
         fh.write(SCRIPT.format(label=LABEL, widget=widget))
     os.chmod(exe, os.stat(exe).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    # Nudge Finder: without this the old icon can persist in its cache.
+    os.utime(app, None)
+    subprocess.run(["touch", app], check=False)
     print(f"built: {app}")
-    print("       drag it to your Dock; double-click restarts the widget")
+    print("       drag it to your Dock; double-click starts or restarts the widget")
     return 0
 
 

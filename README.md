@@ -1,3 +1,5 @@
+<img src="docs/images/appicon.png" width="96" align="right" alt="App icon: a progress ring">
+
 # Claude Usage Widget — macOS menu-bar edition
 
 **By Stefanie Herzer, at [heART](https://heartapps.app).**
@@ -34,11 +36,14 @@ python3 -m venv .venv
 
 Put `.venv/bin/claude-usage` on your `PATH` (a symlink into `~/.local/bin` works) and it is just `claude-usage`.
 
-**Restarting it.** Right-click the widget and choose **Restart widget** — no Terminal. For when it is not running at all, build a double-clickable restarter once and keep it in your Dock:
+**A double-clickable app.** Build one once and keep it in your Dock — it starts the widget, or restarts it if it is already running:
 
 ```bash
-.venv/bin/python tools/make-restart-app.py ~/Applications
+.venv/bin/python tools/make-icon.py
+.venv/bin/python tools/make-app.py ~/Applications
 ```
+
+You can also right-click the widget and choose **Restart widget**. The widget itself runs as a menu-bar utility: no Dock icon and no app-switcher entry, like every other status-bar tool. Set `macos_dock_icon` to `true` if you would rather have one.
 
 **Start at login:** `./setup-autostart.sh` writes and loads a LaunchAgent — and refuses to, until it has seen your plan data actually flow, so you never autostart a widget that shows nothing. This also keeps the widget alive when the shell that launched it exits.
 
@@ -75,6 +80,8 @@ In the panel: **Week / Month** switches the activity grid; the **Light / Dark** 
 | `strip_bg_opacity_dark` / `_light` | `100` | Background and border opacity, per appearance; dials, numbers and handles are always solid |
 | `strip_contrast_dark` / `_light` | `50` | Pushes the ground toward black or white and strengthens border, track and handles |
 | `strip_hover_solid` | `true` | Background lifts to solid while the pointer is over the strip, so the handles are always usable |
+| `strip_handles_mirrored` | *(from the corner preset)* | Which end the scale grip sits on; never changes on its own |
+| `macos_dock_icon` | `false` | Give the widget a Dock icon and an app-switcher entry |
 
 ## When it cannot reach the API
 
