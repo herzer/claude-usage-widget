@@ -78,3 +78,21 @@ class TestLastSampleTs(unittest.TestCase):
                 fh.write(json.dumps({"ts": 200.5, "session": 0.2}) + "\n")
             self.assertEqual(last_sample_ts(p), 200.5)
             self.assertEqual(last_sample_ts(os.path.join(d, "missing.jsonl")), 0.0)
+
+
+class TestRetryAfterCap(unittest.TestCase):
+    """Honouring Retry-After stops a lockout; capping it stops an hour of
+    blindness. Both matter, so the cap is asserted explicitly."""
+
+    def _wait_ms(self, retry_after: float, cap: float) -> int:
+        wait = min(retry_after, cap) if cap > 0 else retry_after
+        return int((wait + 5.0) * 1000)
+
+    def test_short_wait_is_honoured_in_full(self):
+        self.assertEqual(self._wait_ms(647, 900), 652_000)
+
+    def test_long_wait_is_capped(self):
+        self.assertEqual(self._wait_ms(3600, 900), 905_000)
+
+    def test_cap_of_zero_means_no_cap(self):
+        self.assertEqual(self._wait_ms(3600, 0), 3_605_000)

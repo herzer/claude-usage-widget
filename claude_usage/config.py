@@ -145,6 +145,12 @@ DEFAULT_CONFIG: Config = {
     # for a process launched from an interpreter shows Python's icon anyway.
     # Set true to get a regular app with a Dock icon.
     "macos_dock_icon": False,
+    # Ceiling on an honoured Retry-After. Honouring it in full was the fix
+    # for a self-sustaining lockout, but a one-hour penalty then left the
+    # widget blind for a full hour even after the limit cleared. One probe
+    # every 15 minutes is far gentler than the 300 s polling that caused the
+    # lockout, and bounds how long stale numbers can sit there.
+    "retry_after_cap_seconds": 900,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"

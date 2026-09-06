@@ -1694,10 +1694,16 @@ class ClaudeUsageApp(QObject):
         if stats.rate_limit_error:
             retry_after = float(getattr(stats, "retry_after_seconds", 0.0) or 0.0)
             if retry_after > 0:
-                # The server said exactly how long to wait, so honour it even
-                # when it exceeds refresh_max_seconds. Capping below the
-                # penalty window is what kept this permanently throttled.
-                next_ms = int((retry_after + 5.0) * 1000)
+                # Honour the server's wait -- capping below the penalty window
+                # is what once kept this permanently throttled -- but not
+                # without limit: a one-hour Retry-After left the widget blind
+                # for an hour even after the limit had cleared. Probe again at
+                # the cap; if it is still throttled the fresh Retry-After
+                # applies, and one probe per 15 minutes is nothing like the
+                # 300 s polling that caused the lockout.
+                cap = float(self.config.get("retry_after_cap_seconds", 900) or 900)
+                wait = min(retry_after, cap) if cap > 0 else retry_after
+                next_ms = int((wait + 5.0) * 1000)
             else:
                 next_ms = min(self._timer.interval() * 2, self._max_refresh_ms)
         else:
