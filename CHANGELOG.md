@@ -3,6 +3,14 @@
 All notable changes to this project are documented here.
 This project follows [semantic versioning](https://semver.org/).
 
+## 0.13.2 — strip appearance is a choice
+
+- Background opacity per appearance (`strip_bg_opacity_dark` / `_light`), **100 by default** — upstream's 0.75 `osd_opacity` had leaked into the strip. It affects only the background and border; dials, numbers and handles are always solid.
+- The background lifts to solid while the pointer is over the strip (`strip_hover_solid`), so the handles are usable on any desktop.
+- A contrast control per appearance (`strip_contrast_dark` / `_light`).
+- An edit zone in the panel with the house stepper (− value +, hold to repeat, scroll to sweep) for the appearance it is showing.
+- A stale or disconnected border stays solid regardless of opacity.
+
 ## 0.13.1 — never let stale numbers pass for live ones
 
 - **Link state on every surface.** Live / stale / disconnected, judged in one place from the last poll's error and the time since the last *successful* fetch. The strip goes gray with an amber age badge (stale) or a red border and dashes (disconnected); the panel gains an always-visible status line with the reason and the exact fix; tray dials gray out; the menu footer reports the last *successful* update instead of the last attempt.

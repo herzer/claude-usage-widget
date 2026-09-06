@@ -46,7 +46,7 @@ Put `.venv/bin/claude-usage` on your `PATH` (a symlink into `~/.local/bin` works
 | Scroll over it | Scale in steps |
 | Right-click | Menu: view (Bars / Gauge / Strip), position, opacity, theme, *Strip in menu bar*, always on top, quit |
 
-In the panel: **Week / Month** switches the activity grid; the **Light / Dark** button restyles the panel *and* the strip; the checkboxes at the bottom choose which dials the optional menu-bar tray icon shows.
+In the panel: **Week / Month** switches the activity grid; the **Light / Dark** button restyles the panel *and* the strip; the checkboxes at the bottom choose which dials the optional menu-bar tray icon shows. **Strip appearance** at the bottom tunes background opacity and contrast for the appearance the panel is showing — click ± (hold to repeat) or scroll over the value. Transparency is off unless you turn it on, and it only ever affects the background and border.
 
 ## Configuration
 
@@ -66,6 +66,9 @@ In the panel: **Week / Month** switches the activity grid; the **Light / Dark** 
 | `stale_after_seconds` | `600` | Silence before surfaces show **stale** |
 | `notify_stale_after_seconds` | `600` | Stale duration before a desktop notification |
 | `auth_refresh_via_cli` | `true` | On 401, renew the token with one tiny `claude -p` call |
+| `strip_bg_opacity_dark` / `_light` | `100` | Background and border opacity, per appearance; dials, numbers and handles are always solid |
+| `strip_contrast_dark` / `_light` | `50` | Pushes the ground toward black or white and strengthens border, track and handles |
+| `strip_hover_solid` | `true` | Background lifts to solid while the pointer is over the strip, so the handles are always usable |
 
 ## When it cannot reach the API
 
