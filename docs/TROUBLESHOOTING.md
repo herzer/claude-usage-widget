@@ -37,6 +37,18 @@ Consequences:
 - **The CLI refreshes its token only when it makes a real API call.** `claude auth status` reports `loggedIn: true` as long as a blob exists and re-saves it *without* refreshing; launching the TUI and quitting makes no call. If the CLI's refresh token has itself expired, the CLI cannot renew anything — a one-turn `claude -p` will say `401 OAuth access token has expired. Re-authenticate to continue.` The only fix is `claude auth login --claudeai`.
 - **Inspect the Keychain item without exposing the secret:** `security find-generic-password -s "Claude Code-credentials"` (no `-w`) prints the account and modification date only. A `mdat` older than your last sign-in tells you the CLI is not writing there.
 
+## The token lapses every day — and what renews it
+
+After `claude auth login` the access token in the Keychain lasts roughly eight hours. The CLI renews it from its refresh token **only when it makes a real API call**; `claude auth status` re-saves the blob without renewing, and the desktop app never touches the CLI's item. So if you sign in once and then work in the desktop app, the widget's polls start returning 401 the same evening.
+
+Proven on device: a one-turn `claude -p "ok"` renews the token (the Keychain item's `mdat` advances) and the very next poll succeeds. That is what the widget's self-heal does on a 401 (`auth_refresh_via_cli`, throttled to once per fifteen minutes). It resolves the CLI binary explicitly — under launchd, `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin`, so `shutil.which("claude")` finds nothing and a naive hook silently never runs.
+
+If the *refresh* token has expired too, that call returns `401 OAuth access token has expired. Re-authenticate to continue.` — nothing automatic can help, and the widget shows **disconnected** with the one fix: `claude auth login --claudeai`.
+
+## How the widget tells you
+
+Failed polls keep the last known numbers on screen, so the surfaces must say when those stopped being current. `claude_usage/link.py` is the single judgement — live, stale, or disconnected — from the last poll's error and the time since the last *successful* fetch (seeded from `~/.claude/usage-history.jsonl`, which only ever gains a line on success, so a restart cannot pretend to be fresh). The strip, panel, tray and menu all render from it, and notifications fire on transitions. If you ever see plain colors over numbers you doubt, the panel's status line is the truth.
+
 ## Things that looked like fixes and were not
 
 - **Claude Code's `statusLine`** does not carry `rate_limits` in current versions (it sends `context_window`, `cost`, `cwd`, `model`, `session_id`, `workspace` …). Upstream's `statusline_cache_path` feature was written against an older Claude Code and cannot work. Also, `~/.claude/settings.json` is rewritten by the app, so a hand-added `statusLine` key does not survive a restart.

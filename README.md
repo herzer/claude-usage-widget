@@ -63,6 +63,25 @@ In the panel: **Week / Month** switches the activity grid; the **Light / Dark** 
 | `menubar_show_session`, `_all`, `_scoped` | `true` | Which tray dials to draw |
 | `weekly_report_enabled` | `true` | The AI weekly summary — the only feature that spends plan quota |
 | `refresh_seconds` / `refresh_max_seconds` | `60` / `300` | Poll cadence and backoff cap; `Retry-After` overrides both |
+| `stale_after_seconds` | `600` | Silence before surfaces show **stale** |
+| `notify_stale_after_seconds` | `600` | Stale duration before a desktop notification |
+| `auth_refresh_via_cli` | `true` | On 401, renew the token with one tiny `claude -p` call |
+
+## When it cannot reach the API
+
+The widget keeps showing the last numbers it got — but never as if they were current. Every surface renders one of three states:
+
+![Live, stale, and disconnected strips](docs/images/link-states.png)
+
+| State | What you see | What it means |
+|---|---|---|
+| **Live** | Normal colors | The last poll succeeded recently |
+| **Stale** | Gray rings, dimmed numbers, amber border, an age badge (`17m`) | A poll failed (usually rate limiting) or nothing fresh has arrived for `stale_after_seconds`; it retries on its own |
+| **Disconnected** | Red border, dashes instead of numbers, a red `!` | Waiting cannot help: the token is expired, missing, or lacks permission. The panel's status line and the tooltip say exactly what to run |
+
+The panel's status line always shows the time since the last *successful* fetch, and the menu's footer says "STALE — last data 17 hours 24 minutes ago" rather than pretending. A desktop notification fires when it disconnects (with the fix), when it has been stale for ten minutes, and when it reconnects.
+
+**It heals itself.** The Claude Code CLI only renews its OAuth token when *it* makes an API call — if you work in the desktop app, the token the widget reads lapses roughly eight hours after you sign in. On a 401 the widget therefore makes one tiny authenticated CLI call (`claude -p`, one turn, a few dozen tokens, at most once per fifteen minutes), which renews the token in place. Set `auth_refresh_via_cli` to `false` if you would rather it only warned.
 
 ## Blank bars?
 

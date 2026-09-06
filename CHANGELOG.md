@@ -3,6 +3,13 @@
 All notable changes to this project are documented here.
 This project follows [semantic versioning](https://semver.org/).
 
+## 0.13.1 — never let stale numbers pass for live ones
+
+- **Link state on every surface.** Live / stale / disconnected, judged in one place from the last poll's error and the time since the last *successful* fetch. The strip goes gray with an amber age badge (stale) or a red border and dashes (disconnected); the panel gains an always-visible status line with the reason and the exact fix; tray dials gray out; the menu footer reports the last *successful* update instead of the last attempt.
+- **Desktop notifications** on transitions: disconnected (with the fix), stale after ten minutes, reconnected.
+- **Self-healing token.** On 401 the widget makes one tiny `claude -p` call, which renews the CLI's OAuth token where `claude auth status` does not; the binary is resolved explicitly so it works under launchd. `auth_refresh_via_cli` switches it off.
+- New keys: `stale_after_seconds`, `notify_stale_after_seconds`, `auth_refresh_via_cli`.
+
 ## 0.13.0 — macOS menu-bar edition (fork)
 
 First release of the [herzer/claude-usage-widget](https://github.com/herzer/claude-usage-widget) fork.
