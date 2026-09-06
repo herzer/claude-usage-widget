@@ -49,6 +49,16 @@ If the *refresh* token has expired too, that call returns `401 OAuth access toke
 
 Failed polls keep the last known numbers on screen, so the surfaces must say when those stopped being current. `claude_usage/link.py` is the single judgement — live, stale, or disconnected — from the last poll's error and the time since the last *successful* fetch (seeded from `~/.claude/usage-history.jsonl`, which only ever gains a line on success, so a restart cannot pretend to be fresh). The strip, panel, tray and menu all render from it, and notifications fire on transitions. If you ever see plain colors over numbers you doubt, the panel's status line is the truth.
 
+## The activity grid stopped growing
+
+Samples are appended only on a successful endpoint fetch, to
+`<claude_dir>/usage-history.jsonl`. If that directory does not exist the
+append raises `OSError` and is swallowed, so the numbers on screen stay
+correct (the widget tracks its last success in memory) while the history
+silently stops. Check `claude_dir` in your config first — it should be
+`~/.claude`. Version 0.14.2 fixed the way it could be corrupted: building the
+app with a throwaway config used to overwrite the user's real config file.
+
 ## Things that looked like fixes and were not
 
 - **Claude Code's `statusLine`** does not carry `rate_limits` in current versions (it sends `context_window`, `cost`, `cwd`, `model`, `session_id`, `workspace` …). Upstream's `statusline_cache_path` feature was written against an older Claude Code and cannot work. Also, `~/.claude/settings.json` is rewritten by the app, so a hand-added `statusLine` key does not survive a restart.

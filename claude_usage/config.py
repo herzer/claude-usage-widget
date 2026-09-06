@@ -156,6 +156,9 @@ DEFAULT_CONFIG: Config = {
     # every 15 minutes is far gentler than the 300 s polling that caused the
     # lockout, and bounds how long stale numbers can sit there.
     "retry_after_cap_seconds": 900,
+    # Where to persist changes. None = the user's config file; "" disables
+    # persistence, which is what a test harness wants.
+    "config_path": None,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"

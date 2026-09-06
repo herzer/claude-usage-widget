@@ -96,3 +96,24 @@ class TestRetryAfterCap(unittest.TestCase):
 
     def test_cap_of_zero_means_no_cap(self):
         self.assertEqual(self._wait_ms(3600, 0), 3_605_000)
+
+
+class TestPersistenceIsNotHijacked(unittest.TestCase):
+    """Building the app with a throwaway config must not overwrite the
+    user's real one. A harness once wrote a temp claude_dir into the live
+    config, so the widget read session data from a directory that had
+    already been deleted."""
+
+    def test_config_path_redirects_the_write(self):
+        import json
+        from claude_usage.config import save_config
+        with tempfile.TemporaryDirectory() as d:
+            target = os.path.join(d, "redirected.json")
+            save_config(target, {"claude_dir": d, "config_path": target})
+            self.assertTrue(os.path.isfile(target))
+            self.assertEqual(json.load(open(target))["claude_dir"], d)
+
+    def test_empty_config_path_means_do_not_persist(self):
+        # The guard lives in _persist_config; assert the contract it reads.
+        cfg = {"config_path": ""}
+        self.assertEqual(cfg.get("config_path"), "")

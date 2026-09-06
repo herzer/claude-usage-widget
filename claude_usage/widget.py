@@ -1653,8 +1653,18 @@ class ClaudeUsageApp(QObject):
         The change still applies for the remainder of the session.
         """
         from claude_usage.config import save_config, user_config_path
+        # Write to the file this config came from, not unconditionally to the
+        # user's. A harness that builds ClaudeUsageApp with a throwaway config
+        # (a temp claude_dir, say) otherwise overwrites the real one -- which
+        # happened: a test's temp directory ended up as the live claude_dir,
+        # so the widget read session data from, and wrote history to, a
+        # directory that no longer existed. Set config_path to redirect, or
+        # to "" to disable persistence entirely.
+        path = self.config.get("config_path")
+        if path == "":
+            return
         try:
-            save_config(user_config_path(), self.config)
+            save_config(path or user_config_path(), self.config)
         except OSError:
             pass
 
