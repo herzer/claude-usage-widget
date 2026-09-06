@@ -3,6 +3,11 @@
 All notable changes to this project are documented here.
 This project follows [semantic versioning](https://semver.org/).
 
+## 0.14.2 — a throwaway config can no longer hijack the real one
+
+- **Fixed: successful polls stopped being recorded.** `_persist_config` always wrote to the user's config file, whatever config the app had been built with. A test harness constructed with a temporary `claude_dir` therefore wrote that temp path into the live config — after which the widget read session data from, and appended history to, a directory that had already been deleted. Every append raised `OSError` and was swallowed, so the activity grid quietly stopped growing while the on-screen numbers looked fine.
+- `config_path` now decides where changes are written: unset for the user's file, `""` to disable persistence, which is what a harness should use.
+
 ## 0.14.1 — a long rate limit no longer blinds it, and polls are logged
 
 - **The honoured `Retry-After` is capped** (`retry_after_cap_seconds`, default 900). Honouring it in full fixed a self-sustaining lockout, but a 3600 s penalty then set the poll timer to a full hour, so the widget sat idle long after the limit had cleared. It now probes again at the cap; if still throttled, the fresh value applies.
