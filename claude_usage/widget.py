@@ -1064,6 +1064,7 @@ class ClaudeUsageApp(QObject):
         self.heart_panel.dialToggled.connect(self._on_dial_toggled)
         self.heart_panel.appearanceChanged.connect(self._on_panel_appearance)
         self.heart_panel.scopedLabelSeen.connect(self._on_scoped_label_seen)
+        self.heart_panel.stripStyleChanged.connect(self._on_strip_style_changed)
 
         # Context menu shown on right-click of the OSD.
         self._context_menu = QMenu()
@@ -1821,6 +1822,20 @@ class ClaudeUsageApp(QObject):
         self.config[key] = bool(on)
         if self.menubar is not None:
             self.menubar.set_config(self.config)
+        self._persist_config()
+
+    def _on_strip_style_changed(self, dark: bool, key: str, value: int) -> None:
+        """Panel edit zone -> overlay + config, per appearance."""
+        suffix = "dark" if dark else "light"
+        if key == "bg":
+            self.config[f"strip_bg_opacity_{suffix}"] = int(value)
+            self.overlay.set_strip_style(dark, bg_opacity=int(value))
+        elif key == "contrast":
+            self.config[f"strip_contrast_{suffix}"] = int(value)
+            self.overlay.set_strip_style(dark, contrast=int(value))
+        elif key == "hover":
+            self.config["strip_hover_solid"] = bool(value)
+            self.overlay.set_strip_style(dark, hover_solid=bool(value))
         self._persist_config()
 
     def _on_scoped_label_seen(self, label: str) -> None:

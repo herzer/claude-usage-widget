@@ -451,6 +451,127 @@ class Segmented(QWidget):
         """)
 
 
+class Stepper(QWidget):
+    """The house stepper: ``− value +`` in one rounded field, value in
+    italic. Click ± (hold to repeat), or scroll over it. It replaces the
+    slider: scrolling sweeps just as well, and ± still lands on an exact
+    value."""
+
+    valueChanged = Signal(int)
+
+    def __init__(self, value: int, lo: int, hi: int, step: int, suffix: str,
+                 t: dict[str, str], parent=None) -> None:
+        super().__init__(parent)
+        self._v, self._lo, self._hi, self._step, self._suffix = int(value), lo, hi, step, suffix
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self._minus = QPushButton("−"); self._plus = QPushButton("+")
+        for b, d in ((self._minus, -1), (self._plus, 1)):
+            b.setFixedSize(CONTROL_H_SM, CONTROL_H_SM)
+            b.setAutoRepeat(True); b.setAutoRepeatDelay(350); b.setAutoRepeatInterval(60)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, dd=d: self.set_value(self._v + dd * self._step))
+        self._label = QLabel()
+        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setFixedHeight(CONTROL_H_SM)
+        self._label.setMinimumWidth(52)
+        lay.addWidget(self._minus); lay.addWidget(self._label); lay.addWidget(self._plus)
+        self.set_tokens(t)
+        self._render()
+
+    def value(self) -> int:
+        return self._v
+
+    def set_value(self, v: int, emit: bool = True) -> None:
+        v = max(self._lo, min(self._hi, int(v)))
+        if v == self._v:
+            return
+        self._v = v
+        self._render()
+        if emit:
+            self.valueChanged.emit(v)
+
+    def wheelEvent(self, event) -> None:
+        d = event.angleDelta().y()
+        if d:
+            self.set_value(self._v + (self._step if d > 0 else -self._step))
+        event.accept()
+
+    def _render(self) -> None:
+        self._label.setText(f"{self._v}{self._suffix}")
+
+    def set_tokens(self, t: dict[str, str]) -> None:
+        self.setStyleSheet(f"""
+            QPushButton {{ background: {t['track']}; color: {t['text_2']}; border: none;
+                          font-size: 13px; font-weight: 600; padding: 0; }}
+            QPushButton:first-child {{ border-top-left-radius: 6px; border-bottom-left-radius: 6px; }}
+            QPushButton:last-child  {{ border-top-right-radius: 6px; border-bottom-right-radius: 6px; }}
+            QPushButton:hover {{ color: {t['text']}; }}
+            QLabel {{ background: {t['track']}; color: {t['text']}; font-size: 11px;
+                     font-style: italic; border-left: 1px solid {t['card_edge']};
+                     border-right: 1px solid {t['card_edge']}; }}
+        """)
+
+
+class AppearanceZone(QWidget):
+    """The strip's edit zone: background opacity, contrast, hover-solid --
+    for the appearance the panel is currently showing. Values are stored
+    per appearance, so tuning dark never touches light."""
+
+    changed = Signal(bool, str, int)      # (dark, key, value)
+
+    def __init__(self, config: dict[str, Any], t: dict[str, str], dark: bool, parent=None) -> None:
+        super().__init__(parent)
+        self._config = config
+        self._dark = dark
+        # Two rows, so the zone never widens the panel past what the
+        # activity grid needs: steppers on the first, the hover switch on
+        # the second. Every control shares CONTROL_H_SM.
+        from PySide6.QtWidgets import QGridLayout
+        lay = QGridLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setHorizontalSpacing(10)
+        lay.setVerticalSpacing(6)
+        self._bg = Stepper(100, 0, 100, 5, " %", t)
+        self._ct = Stepper(50, 0, 100, 5, "", t)
+        self._hover = QCheckBox("Solid while the pointer is over it")
+        self._hover.setFixedHeight(CONTROL_H_SM)
+        self._hover.setCursor(Qt.PointingHandCursor)
+        for col, (label, w) in enumerate((("Background", self._bg), ("Contrast", self._ct))):
+            lab = QLabel(label); lab.setObjectName("cap")
+            lay.addWidget(lab, 0, col * 2, Qt.AlignVCenter)
+            lay.addWidget(w, 0, col * 2 + 1, Qt.AlignVCenter)
+        lay.addWidget(self._hover, 1, 0, 1, 4)
+        lay.setColumnStretch(4, 1)
+        self._bg.valueChanged.connect(lambda v: self.changed.emit(self._dark, "bg", v))
+        self._ct.valueChanged.connect(lambda v: self.changed.emit(self._dark, "contrast", v))
+        self._hover.toggled.connect(lambda on: self.changed.emit(self._dark, "hover", int(on)))
+        self.set_appearance(dark)
+        self.set_tokens(t)
+
+    def set_appearance(self, dark: bool) -> None:
+        """Show the values for this appearance; never emits."""
+        self._dark = bool(dark)
+        suffix = "dark" if dark else "light"
+        self._bg.set_value(int(self._config.get(f"strip_bg_opacity_{suffix}", 100) or 100), emit=False)
+        self._ct.set_value(int(self._config.get(f"strip_contrast_{suffix}", 50) or 0), emit=False)
+        self._hover.blockSignals(True)
+        self._hover.setChecked(bool(self._config.get("strip_hover_solid", True)))
+        self._hover.blockSignals(False)
+
+    def set_tokens(self, t: dict[str, str]) -> None:
+        for w in (self._bg, self._ct):
+            w.set_tokens(t)
+        self.setStyleSheet(f"""
+            QLabel#cap {{ color: {t['text_dim']}; font-size: 11px; font-weight: 600; }}
+            QCheckBox {{ color: {t['text_2']}; font-size: 11px; spacing: 6px; }}
+            QCheckBox::indicator {{ width: 12px; height: 12px; border-radius: 4px;
+                border: 1.5px solid {t['track']}; background: transparent; }}
+            QCheckBox::indicator:checked {{ background: {t['accent_' + DIAL_ALL]}; border-color: {t['accent_' + DIAL_ALL]}; }}
+        """)
+
+
 class DialToggles(QWidget):
     """Which of the three dials the menu bar shows."""
 
@@ -550,6 +671,7 @@ class HeartPanel(QWidget):
     dialToggled = Signal(str, bool)
     appearanceChanged = Signal(bool)      # True = dark
     scopedLabelSeen = Signal(str)         # persist the API's name for the cap
+    stripStyleChanged = Signal(bool, str, int)   # (dark, 'bg'|'contrast'|'hover', value)
 
     def __init__(self, config: dict[str, Any], parent=None) -> None:
         super().__init__(parent)
@@ -620,6 +742,14 @@ class HeartPanel(QWidget):
         self._dials.toggled.connect(self.dialToggled.emit)
         root.addWidget(self._dials)
 
+        # --- strip appearance edit zone (follows the panel's appearance) ---
+        zone_head = QLabel("Strip appearance")
+        zone_head.setObjectName("section")
+        root.addWidget(zone_head)
+        self._zone = AppearanceZone(self._config, self._t, self._dark)
+        self._zone.changed.connect(self.stripStyleChanged.emit)
+        root.addWidget(self._zone)
+
         self._apply_tokens()
 
     # -- appearance --------------------------------------------------------
@@ -631,6 +761,7 @@ class HeartPanel(QWidget):
         self._dark = bool(dark)
         self._t = tokens(self._dark)
         self._apply_tokens()
+        self._zone.set_appearance(self._dark)
         if self._stats is not None:
             self.update_stats(self._stats)
 
@@ -641,6 +772,8 @@ class HeartPanel(QWidget):
             w.set_tokens(t)
         self._seg.set_tokens(t)
         self._dials.set_tokens(t)
+        if hasattr(self, "_zone"):
+            self._zone.set_tokens(t)
         self.setStyleSheet(f"""
             HeartPanel {{ background: {t['bg']}; }}
             QLabel#title {{ color: {t['text']}; font-size: 15px; font-weight: 700; }}

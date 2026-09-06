@@ -127,6 +127,16 @@ DEFAULT_CONFIG: Config = {
     # is the only thing that renews the token when you do not use the CLI
     # yourself; off means the widget can only warn.
     "auth_refresh_via_cli": True,
+    # Strip appearance, paired for dark and light. Background opacity applies
+    # ONLY to the background and border -- dials, numbers and handles are
+    # always solid -- and lifts to solid while the pointer is over the strip
+    # so the handles are always usable. Opaque by default: transparency is a
+    # choice, never a surprise (upstream's 0.75 osd_opacity leaked in here).
+    "strip_bg_opacity_dark": 100,      # percent
+    "strip_bg_opacity_light": 100,
+    "strip_contrast_dark": 50,         # 0..100; 50 = the design's default look
+    "strip_contrast_light": 50,
+    "strip_hover_solid": True,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"

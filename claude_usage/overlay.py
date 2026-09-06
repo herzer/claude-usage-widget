@@ -247,6 +247,16 @@ class UsageOverlay(QWidget):
         self._strip_in_menubar: bool = bool(cfg.get("strip_in_menubar", False))
         self._strip_width_pref: int = int(cfg.get("osd_strip_width", 0) or 0)
         self._link = None            # LinkState; None until the app pushes one
+        # Strip appearance (see DEFAULT_CONFIG). Kept per appearance so a
+        # value tuned for a dark desktop does not wreck the light one.
+        self._strip_style = {
+            True:  {"bg": int(cfg.get("strip_bg_opacity_dark", 100) or 100) / 100.0,
+                    "contrast": int(cfg.get("strip_contrast_dark", 50) or 0) / 100.0},
+            False: {"bg": int(cfg.get("strip_bg_opacity_light", 100) or 100) / 100.0,
+                    "contrast": int(cfg.get("strip_contrast_light", 50) or 0) / 100.0},
+        }
+        self._strip_hover_solid: bool = bool(cfg.get("strip_hover_solid", True))
+        self._hovered: bool = False
         self._menubar_level_warned: bool = False
         # Scale-grip drag state (strip view). Kept separate from the move
         # drag so a grip press can never also start a move.
@@ -542,6 +552,30 @@ class UsageOverlay(QWidget):
         if self._scoped_label:
             dials.append((DIAL_SCOPED, self._scoped_pct))
         return dials
+
+    def set_strip_style(self, dark: bool, bg_opacity: int | None = None,
+                        contrast: int | None = None, hover_solid: bool | None = None) -> None:
+        """Update one appearance's strip style from the panel's edit zone."""
+        s = self._strip_style[bool(dark)]
+        if bg_opacity is not None:
+            s["bg"] = max(0, min(100, int(bg_opacity))) / 100.0
+        if contrast is not None:
+            s["contrast"] = max(0, min(100, int(contrast))) / 100.0
+        if hover_solid is not None:
+            self._strip_hover_solid = bool(hover_solid)
+        self.update()
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        if self._view_mode == VIEW_MODE_STRIP:
+            self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        if self._view_mode == VIEW_MODE_STRIP:
+            self.update()
+        super().leaveEvent(event)
 
     def set_link(self, link) -> None:
         """LIVE / STALE / DISCONNECTED from the app. Not-live changes the
@@ -1225,14 +1259,32 @@ class UsageOverlay(QWidget):
         alert = _hex_to_qcolor(MENUBAR_CRIT if disconnected else MENUBAR_WARN)
 
         radius = L["h"] * STRIP_RADIUS_FRACTION
-        # Not live: the border turns amber (stale) or red (disconnected), the
-        # rings go gray and the numbers dim -- last-known values must never
-        # pass for live ones.
-        p.setPen(QPen(_hex_to_qcolor(t["card_edge"]), 1) if live else QPen(alert, 1.5))
-        p.setBrush(_hex_to_qcolor(t["card"], self._opacity))
+        # Appearance: background opacity (background + border ONLY; content
+        # stays solid), lifted to solid while hovered so the handles are
+        # always usable; contrast pushes the ground toward black or white and
+        # strengthens border, track and handles.
+        style = self._strip_style[self._strip_dark]
+        c = style["contrast"]
+        bg_alpha = 1.0 if (self._hovered and self._strip_hover_solid) else style["bg"]
+        card = QColor(t["card"])
+        shift = int(100 + 60 * (c - 0.5))            # 70..130
+        card = card.darker(shift) if (self._strip_dark and shift > 100) else \
+               (card.lighter(shift) if (not self._strip_dark and shift > 100) else
+                (card.lighter(200 - shift) if self._strip_dark else card.darker(200 - shift)))
+        card.setAlphaF(bg_alpha)
+        edge = QColor(t["card_edge"]); edge.setAlphaF(bg_alpha * (0.5 + 0.5 * c))
+        # Not live: the border turns amber (stale) or red (disconnected) --
+        # and stays solid regardless of background opacity; a warning that
+        # fades is not a warning.
+        p.setPen(QPen(edge, 1 + c) if live else QPen(alert, 1.5))
+        p.setBrush(card)
         p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), radius, radius)
 
-        dim = _hex_to_qcolor(t["text_dim"])
+        # Handle dots and dim text strengthen with contrast.
+        dim = QColor(t["text_dim"]); strong = QColor(t["text_2"])
+        dim = QColor(int(dim.red() + (strong.red() - dim.red()) * c),
+                     int(dim.green() + (strong.green() - dim.green()) * c),
+                     int(dim.blue() + (strong.blue() - dim.blue()) * c))
         dot, step = L["dot"], L["step"]
         p.setPen(Qt.NoPen)
         p.setBrush(dim)
@@ -1250,10 +1302,10 @@ class UsageOverlay(QWidget):
                 p.drawEllipse(QPointF(ox + c * step, oy + r * step), dot, dot)
 
         ring_d, stroke = L["ring_d"], L["stroke"]
-        track = _hex_to_qcolor(t["track"])
+        track = _hex_to_qcolor(t["track"], 0.55 + 0.45 * c)
         for d in L["dials"]:
             pct = d["pct"]
-            col = _dial_color(pct, self._theme, d["kind"]) if live else _hex_to_qcolor(t["text_dim"])
+            col = _dial_color(pct, self._theme, d["kind"]) if live else dim
             rect = QRectF(d["ring_x"], cy - ring_d / 2, ring_d, ring_d)
             pen = QPen(track, stroke); pen.setCapStyle(Qt.FlatCap)
             p.setPen(pen); p.setBrush(Qt.NoBrush)
