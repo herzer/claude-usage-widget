@@ -246,6 +246,7 @@ class UsageOverlay(QWidget):
         # default.
         self._strip_in_menubar: bool = bool(cfg.get("strip_in_menubar", False))
         self._strip_width_pref: int = int(cfg.get("osd_strip_width", 0) or 0)
+        self._link = None            # LinkState; None until the app pushes one
         self._menubar_level_warned: bool = False
         # Scale-grip drag state (strip view). Kept separate from the move
         # drag so a grip press can never also start a move.
@@ -542,6 +543,23 @@ class UsageOverlay(QWidget):
             dials.append((DIAL_SCOPED, self._scoped_pct))
         return dials
 
+    def set_link(self, link) -> None:
+        """LIVE / STALE / DISCONNECTED from the app. Not-live changes the
+        strip's width (the badge), its colours, and its tooltip."""
+        self._link = link
+        tip = link.headline + (("\n" + link.advice) if link.advice else "")
+        self.setToolTip(tip)
+        if self._view_mode == VIEW_MODE_STRIP and not self._minimized:
+            self._apply_size()
+        self.update()
+
+    def _strip_badge(self) -> str:
+        L = self._link
+        if L is None or L.live:
+            return ""
+        from claude_usage.link import DISCONNECTED, age_short
+        return "!" if L.state == DISCONNECTED else age_short(L.age_s)
+
     def _strip_mirrored(self) -> bool:
         """True when the strip is anchored at its RIGHT edge.
 
@@ -585,9 +603,11 @@ class UsageOverlay(QWidget):
         dial_w = ring_d if inside else ring_d + h * 0.15 + fm_out.horizontalAdvance("100%")
         gap = h * 0.30 if inside else h * 0.35
         content = n * dial_w + max(0, n - 1) * gap
+        badge = self._strip_badge()
+        badge_w = (fm_out.horizontalAdvance(badge) + h * 0.30) if badge else 0.0
         lead = edge + handle_w + h * 0.28
         trail = h * 0.20 + grip_w + edge
-        min_width = int(round(lead + content + trail))
+        min_width = int(round(lead + content + badge_w + trail))
         W = max(min_width, int(width or 0))
         extra = max(0, W - min_width)
         gap_extra = extra / n if n else 0.0      # n-1 inter-dial gaps + the trailing one
@@ -607,8 +627,10 @@ class UsageOverlay(QWidget):
                 d["text_x"] = x + ring_d + h * 0.15
             dials.append(d)
             x += dial_w + gap + gap_extra
+        badge_x = x - gap_extra if badge else 0.0
         return {"h": h, "ring_d": ring_d, "stroke": stroke, "handle_x": handle_x,
                 "dials": dials, "min_width": min_width, "width": W,
+                "badge": badge, "badge_x": badge_x, "badge_font": f_out,
                 "dot": dot, "step": step, "mirrored": mirrored,
                 "grip": QRectF(grip_x, h - edge * 0.6 - grip_w, grip_w, grip_w)}
 
@@ -1196,8 +1218,17 @@ class UsageOverlay(QWidget):
             print(f"claude-usage: strip paint: window {w}x{h} but layout "
                   f"{L['width']}x{L['h']:.0f} scale={self._scale:.2f}", file=sys.stderr)
 
+        from claude_usage.link import DISCONNECTED
+        from claude_usage.menubar import MENUBAR_CRIT, MENUBAR_WARN
+        live = self._link is None or self._link.live
+        disconnected = self._link is not None and self._link.state == DISCONNECTED
+        alert = _hex_to_qcolor(MENUBAR_CRIT if disconnected else MENUBAR_WARN)
+
         radius = L["h"] * STRIP_RADIUS_FRACTION
-        p.setPen(QPen(_hex_to_qcolor(t["card_edge"]), 1))
+        # Not live: the border turns amber (stale) or red (disconnected), the
+        # rings go gray and the numbers dim -- last-known values must never
+        # pass for live ones.
+        p.setPen(QPen(_hex_to_qcolor(t["card_edge"]), 1) if live else QPen(alert, 1.5))
         p.setBrush(_hex_to_qcolor(t["card"], self._opacity))
         p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), radius, radius)
 
@@ -1221,7 +1252,8 @@ class UsageOverlay(QWidget):
         ring_d, stroke = L["ring_d"], L["stroke"]
         track = _hex_to_qcolor(t["track"])
         for d in L["dials"]:
-            pct, col = d["pct"], _dial_color(d["pct"], self._theme, d["kind"])
+            pct = d["pct"]
+            col = _dial_color(pct, self._theme, d["kind"]) if live else _hex_to_qcolor(t["text_dim"])
             rect = QRectF(d["ring_x"], cy - ring_d / 2, ring_d, ring_d)
             pen = QPen(track, stroke); pen.setCapStyle(Qt.FlatCap)
             p.setPen(pen); p.setBrush(Qt.NoBrush)
@@ -1231,10 +1263,14 @@ class UsageOverlay(QWidget):
                 p.setPen(pen)
                 p.drawArc(rect, 90 * 16, -int(min(1.0, pct) * 360 * 16))
             p.setFont(d["font"]); fm = p.fontMetrics()
-            text = f"{int(round(pct * 100))}%"
+            text = "—" if disconnected else f"{int(round(pct * 100))}%"
             p.setPen(col)
             tx = rect.center().x() - fm.horizontalAdvance(text) / 2 if d["inside"] else d["text_x"]
             p.drawText(QPointF(tx, cy + fm.capHeight() / 2), text)
+        if L["badge"]:
+            p.setFont(L["badge_font"]); fm = p.fontMetrics()
+            p.setPen(alert)
+            p.drawText(QPointF(L["badge_x"], cy + fm.capHeight() / 2), L["badge"])
 
     def _paint_minimized(self, p: QPainter, w: int, h: int) -> None:
         """Thin capsule showing session utilisation."""

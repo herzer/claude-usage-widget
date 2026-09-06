@@ -91,6 +91,9 @@ def _default_sender() -> Callable[[str, str], None]:
     return _noop
 
 
+from claude_usage.link import age_text as _age
+
+
 class UsageNotifier:
     """Fires desktop notifications when session/weekly utilization crosses a threshold."""
 
@@ -110,6 +113,31 @@ class UsageNotifier:
         self.detector = CrossingDetector(thresholds)
         self._send = sender or _default_sender()
         self._on_threshold = on_threshold
+
+    def notify_link(self, link, stale_after_s: float = 600.0) -> None:
+        """Desktop notification on link-state transitions, once per episode.
+
+        DISCONNECTED fires at once and names the fix. STALE fires only after
+        ``stale_after_s`` so a single rate-limit backoff does not nag, then
+        stays quiet until the episode ends. A return to LIVE after either
+        says so, so the user knows the numbers are real again."""
+        prev = getattr(self, "_link_prev", "live")
+        state = link.state
+        if state == "disconnected" and prev != "disconnected":
+            self._send("Claude usage: disconnected",
+                       f"{link.error or 'No data'}. {link.advice}")
+            self._stale_sent = False
+        elif state == "stale":
+            if link.age_s >= stale_after_s and not getattr(self, "_stale_sent", False):
+                self._send("Claude usage: numbers are stale",
+                           f"No live data for {_age(link.age_s)}. "
+                           f"{(link.error + '. ') if link.error else ''}Showing last known values.")
+                self._stale_sent = True
+        elif state == "live" and prev != "live":
+            if getattr(self, "_stale_sent", False) or prev == "disconnected":
+                self._send("Claude usage: reconnected", "Live data is back.")
+            self._stale_sent = False
+        self._link_prev = state
 
     def check_stats(self, stats) -> None:
         """Run the detector for each scope and dispatch notifications +

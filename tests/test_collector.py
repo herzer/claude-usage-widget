@@ -1616,6 +1616,8 @@ class TestCredentialRefresh(unittest.TestCase):
         self.assertEqual(runs["n"], 1)
 
     def test_missing_cli_is_not_fatal(self) -> None:
+        # _find_claude also probes ~/.local/bin and Homebrew paths (launchd's
+        # PATH hides them), so mock the resolver, not just shutil.which.
         import claude_usage.collector as c
-        with patch("shutil.which", lambda n: None):
+        with patch.object(c, "_find_claude", lambda: None):
             self.assertFalse(c._refresh_credentials_via_cli())

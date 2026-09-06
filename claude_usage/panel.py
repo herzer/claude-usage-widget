@@ -116,10 +116,16 @@ class Card(QFrame):
     def __init__(self, t: dict[str, str], parent=None) -> None:
         super().__init__(parent)
         self._t = t
+        self._live = True
         self.setAttribute(Qt.WA_StyledBackground, False)
 
     def set_tokens(self, t: dict[str, str]) -> None:
         self._t = t
+        self.update()
+
+    def set_live(self, live: bool) -> None:
+        """Not live: accents go gray so last-known values read as such."""
+        self._live = bool(live)
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
@@ -188,7 +194,7 @@ class RingCard(Card):
         p.drawEllipse(rect)
 
         if self._pct > 0:
-            col = accent_for(DIAL_SESSION, self._pct, t)
+            col = accent_for(DIAL_SESSION, self._pct, t) if self._live else QColor(t["text_dim"])
             # Glow: the same arc drawn a few times underneath, wider and
             # fainter each pass. Cheaper than a blur and it survives being
             # drawn on either a light or a dark surface.
@@ -304,7 +310,7 @@ class LimitsCard(Card):
             p.drawRoundedRect(QRectF(x0, by, x1 - x0, self.BAR_H),
                               self.BAR_H / 2, self.BAR_H / 2)
             if pct > 0:
-                col = accent_for(kind, pct, t)
+                col = accent_for(kind, pct, t) if self._live else QColor(t["text_dim"])
                 grad = QLinearGradient(x0, 0, x1, 0)
                 grad.setColorAt(0.0, col.darker(118))
                 grad.setColorAt(1.0, col.lighter(118))
@@ -578,6 +584,14 @@ class HeartPanel(QWidget):
         head.addWidget(self._appearance)
         root.addLayout(head)
 
+        # Link status: always visible, because the numbers below are shown
+        # even when they are last-known values -- this line is what tells
+        # them apart.
+        self._status = QLabel("")
+        self._status.setObjectName("status")
+        self._status.setWordWrap(True)
+        root.addWidget(self._status)
+
         # --- ring + limits ------------------------------------------------
         cards = QHBoxLayout()
         cards.setSpacing(GUTTER)
@@ -644,6 +658,18 @@ class HeartPanel(QWidget):
             QPushButton:hover {{ color: {t['text']}; }}
         """)
         self.update()
+
+    def set_link(self, link) -> None:
+        t = self._t
+        color = {"live": "#1fa65a", "stale": "#d98a00", "disconnected": "#d93a2b"}.get(link.state, t["text_2"])
+        dot = "●"
+        text = f"{dot} {link.headline}"
+        if link.advice:
+            text += f"  —  {link.advice}"
+        self._status.setText(text)
+        self._status.setStyleSheet(f"QLabel#status {{ color: {color}; font-size: 11px; font-weight: 600; padding: 2px 2px 0 2px; }}")
+        for w in (self._ring, self._limits):
+            w.set_live(link.live)
 
     def _set_mode(self, mode: str) -> None:
         self._mode = mode

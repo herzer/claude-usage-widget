@@ -47,6 +47,27 @@ def append_sample(
         f.write(line + "\n")
 
 
+def last_sample_ts(path: str) -> float:
+    """Timestamp of the most recent successful sample, or 0.0.
+
+    Samples are only ever written on a successful fetch, so this is the
+    honest "last time the numbers were real" -- used to seed the link state
+    at startup so a restart cannot pretend to be fresh."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            fh.seek(max(0, size - 4096))
+            tail = fh.read().decode("utf-8", errors="replace").strip().splitlines()
+        for line in reversed(tail):
+            line = line.strip()
+            if line:
+                return float(json.loads(line).get("ts", 0.0) or 0.0)
+    except (OSError, ValueError):
+        pass
+    return 0.0
+
+
 def load_samples(path: str, since_ts: float = 0.0) -> list[dict]:
     """Read all samples from JSONL, optionally filtering to `ts >= since_ts`."""
     if not os.path.isfile(path):

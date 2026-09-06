@@ -1,0 +1,80 @@
+"""The link state must be impossible to mistake: stale or disconnected
+numbers may be shown, but never as live ones."""
+import json
+import os
+import tempfile
+import time
+import unittest
+
+from claude_usage.history import last_sample_ts
+from claude_usage.link import (DISCONNECTED, LIVE, STALE, age_short, age_text,
+                               classify)
+
+
+class TestClassify(unittest.TestCase):
+    def test_recent_success_is_live(self):
+        self.assertEqual(classify("", 0, 30).state, LIVE)
+
+    def test_expired_token_is_disconnected_with_the_fix(self):
+        s = classify("Credentials expired -- re-authenticate with 'claude'", 0, 5)
+        self.assertEqual(s.state, DISCONNECTED)
+        self.assertIn("claude auth login", s.advice)
+
+    def test_no_credentials_and_403_are_disconnected(self):
+        self.assertEqual(classify("No credentials -- run 'claude-usage'", 0, 5).state, DISCONNECTED)
+        self.assertEqual(classify("OAuth usage error 403", 0, 5).state, DISCONNECTED)
+
+    def test_rate_limit_is_stale_and_names_the_wait(self):
+        s = classify("Rate limited -- using last known values", 647, 200)
+        self.assertEqual(s.state, STALE)
+        self.assertIn("10 minutes", s.headline)   # 647 s written out
+        self.assertEqual(s.advice, "")
+
+    def test_silence_past_threshold_is_stale_even_without_an_error(self):
+        # A stopped timer or a hung poll: no error string, no fresh data.
+        self.assertEqual(classify("", 0, 601, stale_after_s=600).state, STALE)
+        self.assertEqual(classify("", 0, 599, stale_after_s=600).state, LIVE)
+
+    def test_seventeen_hours_reads_as_seventeen_hours(self):
+        s = classify("Credentials expired", 0, 17.4 * 3600)
+        self.assertIn("17 hours 24 minutes", s.headline)
+
+
+class TestNever(unittest.TestCase):
+    def test_no_data_yet_is_said_plainly(self):
+        s = classify("", 0, 10 ** 9)
+        self.assertEqual(s.state, STALE)
+        self.assertIn("No data received yet", s.headline)
+        self.assertNotIn("days", s.headline)
+        self.assertEqual(age_short(10 ** 9), "?")
+
+    def test_float_ages_round_instead_of_truncating(self):
+        self.assertEqual(age_text(17.4 * 3600), "17 hours 24 minutes")
+
+
+class TestAgeText(unittest.TestCase):
+    def test_singular_and_plural_are_written_out(self):
+        self.assertEqual(age_text(1), "1 second")
+        self.assertEqual(age_text(45), "45 seconds")
+        self.assertEqual(age_text(60), "1 minute")
+        self.assertEqual(age_text(3600), "1 hour")
+        self.assertEqual(age_text(3600 * 2 + 60 * 5), "2 hours 5 minutes")
+        self.assertEqual(age_text(86400 * 3), "3 days")
+        self.assertNotIn("(s)", age_text(125))
+
+    def test_short_form(self):
+        self.assertEqual(age_short(45), "45s")
+        self.assertEqual(age_short(17 * 60), "17m")
+        self.assertEqual(age_short(3 * 3600 + 5), "3h")
+        self.assertEqual(age_short(2 * 86400), "2d")
+
+
+class TestLastSampleTs(unittest.TestCase):
+    def test_reads_the_last_line_and_survives_junk(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "usage-history.jsonl")
+            with open(p, "w") as fh:
+                fh.write(json.dumps({"ts": 100.0, "session": 0.1}) + "\n")
+                fh.write(json.dumps({"ts": 200.5, "session": 0.2}) + "\n")
+            self.assertEqual(last_sample_ts(p), 200.5)
+            self.assertEqual(last_sample_ts(os.path.join(d, "missing.jsonl")), 0.0)

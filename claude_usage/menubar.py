@@ -133,6 +133,7 @@ def render_indicator_pixmap(
     values: "list[tuple[str, float]]",
     dpr: float = 2.0,
     dark: bool | None = None,
+    live: bool = True,
 ) -> QPixmap:
     """Paint the menu-bar pixmap for ``values`` -- ``(kind, fraction)`` pairs
     in draw order. An empty list yields a 1x1 transparent pixmap rather than a
@@ -177,8 +178,9 @@ def render_indicator_pixmap(
     cy = BAR_HEIGHT / 2
 
     x = EDGE_PAD
+    gray = QColor(128, 128, 134)
     for (kind, pct), w in zip(values, widths):
-        col = _dial_color(pct, theme, kind)
+        col = _dial_color(pct, theme, kind) if live else gray
         _draw_dial(p, x + RING_D / 2, cy, pct, track, col)
         x += RING_D + LABEL_GAP
         p.setPen(col)
@@ -208,6 +210,7 @@ class MenuBarIndicator:
         self._pcts: dict[str, float] = {k: 0.0 for k in DIAL_ORDER}
         self._scoped_label = ""
         self._has_scoped = False
+        self._link = None
         if menu is not None:
             self._tray.setContextMenu(menu)
         self._repaint()
@@ -238,6 +241,10 @@ class MenuBarIndicator:
         self._has_scoped = bool(self._scoped_label)
         self._repaint()
 
+    def set_link(self, link) -> None:
+        self._link = link
+        self._repaint()
+
     def _visible_dials(self) -> "list[tuple[str, float]]":
         out = []
         for kind in DIAL_ORDER:
@@ -255,11 +262,14 @@ class MenuBarIndicator:
             return
         # Icon BEFORE visibility: Qt warns "No Icon set" if a tray item is
         # shown while still iconless, and on some platforms shows a gap.
-        self._tray.setIcon(QIcon(render_indicator_pixmap(self._theme, dials)))
+        live = self._link is None or self._link.live
+        self._tray.setIcon(QIcon(render_indicator_pixmap(self._theme, dials, live=live)))
         self._tray.setVisible(True)
         names = {**DIAL_TITLES, DIAL_SCOPED: self._scoped_label or "Scoped"}
-        self._tray.setToolTip("   ".join(
-            f"{names[k]}: {_pct_text(v)}" for k, v in dials))
+        tip = "   ".join(f"{names[k]}: {_pct_text(v)}" for k, v in dials)
+        if not live:
+            tip = self._link.headline + "\n" + tip
+        self._tray.setToolTip(tip)
 
     def hide(self) -> None:
         self._tray.hide()

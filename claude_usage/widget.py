@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 from claude_usage.collector import UsageStats, collect_all
 from claude_usage.forecast import format_forecast
 from claude_usage.notifier import UsageNotifier
+from claude_usage.link import classify, LinkState, age_text
 from claude_usage.menubar import MenuBarIndicator
 from claude_usage.panel import HeartPanel
 from claude_usage.overlay import UsageOverlay, _hex_to_qcolor
@@ -1035,6 +1036,18 @@ class ClaudeUsageApp(QObject):
         # "Updated Xs ago" footer.  Never read by anything else.
         import time as _time
         self._last_refresh_ts: float = 0.0
+        # Last SUCCESSFUL fetch -- distinct from the last poll, which may have
+        # failed and left last-known values on screen. Seeded from the history
+        # file so a restart cannot pretend to be fresh.
+        import os as _os
+        from claude_usage.collector import HISTORY_FILENAME, set_auth_refresh_enabled
+        from claude_usage.history import last_sample_ts
+        self._last_success_ts: float = last_sample_ts(
+            _os.path.join(str(config.get("claude_dir") or _os.path.expanduser("~/.claude")), HISTORY_FILENAME))
+        self._link_error: str = ""
+        self._link_retry: float = 0.0
+        self._link: LinkState | None = None
+        set_auth_refresh_enabled(bool(config.get("auth_refresh_via_cli", True)))
 
         # UI components — we keep BOTH popup implementations around:
         # the default one (full QLayout + child widgets) handles the five
@@ -1163,6 +1176,13 @@ class ClaudeUsageApp(QObject):
         self._timer = QTimer()
         self._timer.setInterval(self._base_refresh_ms)
         self._timer.timeout.connect(self._refresh_async)
+        # Keep the shown age honest between polls: STALE must grow on screen
+        # even while the poll timer is sitting out a long Retry-After.
+        self._link_timer = QTimer()
+        self._link_timer.setInterval(30_000)
+        self._link_timer.timeout.connect(lambda: self._update_link())
+        self._link_timer.start()
+        self._update_link("", 0.0)
         self._timer.start()
 
         # GitHub release check — once on startup, then re-checked daily. We
@@ -1548,11 +1568,12 @@ class ClaudeUsageApp(QObject):
         if live is not None and getattr(live, "is_live", False):
             tpm = float(getattr(live, "tokens_per_minute", 0.0) or 0.0)
             live_txt = f"  ·  ● {tpm / 1000:.1f}k t/m"
-        if self._last_refresh_ts <= 0:
+        if self._last_refresh_ts <= 0 and self._last_success_ts <= 0:
             self._act_stats_header.setText("Loading…")
         else:
+            flag = "" if (self._link is None or self._link.live) else "⚠ NOT LIVE  ·  "
             self._act_stats_header.setText(
-                f"Session {s_pct}%  ·  Weekly {w_pct}%{live_txt}"
+                f"{flag}Session {s_pct}%  ·  Weekly {w_pct}%{live_txt}"
             )
 
         # Update banner — only visible when the GitHub release check
@@ -1605,19 +1626,18 @@ class ClaudeUsageApp(QObject):
         if pos_act is not None:
             pos_act.setChecked(True)
 
-        # Footer — "Updated 12s ago" / "5m ago" / "1h 23m ago".
-        if self._last_refresh_ts <= 0:
-            self._act_refresh_footer.setText("Updated never")
+        # Footer: the time since the last SUCCESSFUL fetch, never the last
+        # attempt -- "Updated 2 minutes ago" over hour-old numbers is the lie
+        # this whole state exists to prevent.
+        if self._last_success_ts <= 0:
+            self._act_refresh_footer.setText("No data received yet")
         else:
             import time as _t
-            secs = max(0, int(_t.time() - self._last_refresh_ts))
-            if secs < 60:
-                ago = f"{secs}s ago"
-            elif secs < 3600:
-                ago = f"{secs // 60}m ago"
+            ago = age_text(_t.time() - self._last_success_ts)
+            if self._link is not None and not self._link.live:
+                self._act_refresh_footer.setText(f"⚠ {self._link.state.upper()} — last data {ago} ago")
             else:
-                ago = f"{secs // 3600}h {(secs % 3600) // 60}m ago"
-            self._act_refresh_footer.setText(f"Updated {ago}")
+                self._act_refresh_footer.setText(f"Updated {ago} ago")
 
     def _persist_config(self) -> None:
         """Write the in-memory config to the user's XDG config file.
@@ -1658,6 +1678,8 @@ class ClaudeUsageApp(QObject):
         self.stats = stats
         import time as _t
         self._last_refresh_ts = _t.time()
+        if not stats.rate_limit_error:
+            self._last_success_ts = _t.time()
 
         # Adaptive poll interval: a clean refresh snaps straight back to the
         # base cadence; an errored/rate-limited one doubles the interval (up to
@@ -1683,6 +1705,8 @@ class ClaudeUsageApp(QObject):
         self.heart_panel.update_stats(stats)
         if self.menubar is not None:
             self.menubar.update_stats(stats)
+        self._update_link(stats.rate_limit_error or "",
+                          float(getattr(stats, "retry_after_seconds", 0.0) or 0.0))
         self.notifier.check_stats(stats)
 
         # Real-time burn/spike/retry-storm — debounced once-per-episode desktop
@@ -1761,6 +1785,28 @@ class ClaudeUsageApp(QObject):
             })
 
     # -------------------------------------------------------------- slots
+
+    def _update_link(self, error: str | None = None, retry_after: float | None = None) -> None:
+        """Recompute LIVE / STALE / DISCONNECTED and push it to every surface.
+
+        Called with the poll result after each refresh, and with no
+        arguments by the 30 s ticker so the age keeps growing."""
+        import time as _t
+        if error is not None:
+            self._link_error = error
+            self._link_retry = float(retry_after or 0.0)
+        age = (_t.time() - self._last_success_ts) if self._last_success_ts > 0 else 10 ** 9
+        link = classify(self._link_error, self._link_retry, age,
+                        float(self.config.get("stale_after_seconds", 600) or 600))
+        self._link = link
+        self.overlay.set_link(link)
+        self.heart_panel.set_link(link)
+        if self.menubar is not None:
+            self.menubar.set_link(link)
+        try:
+            self.notifier.notify_link(link, float(self.config.get("notify_stale_after_seconds", 600) or 600))
+        except Exception:
+            pass
 
     def _on_strip_width_changed(self, width: int) -> None:
         self.config["osd_strip_width"] = int(width)

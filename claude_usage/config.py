@@ -118,6 +118,15 @@ DEFAULT_CONFIG: Config = {
     "strip_in_menubar": False,
     # Strip width chosen by dragging its grip; 0 = fit the content.
     "osd_strip_width": 0,
+    # Link state: how long without a successful fetch before the surfaces
+    # show STALE, and after how long a desktop notification fires.
+    "stale_after_seconds": 600,
+    "notify_stale_after_seconds": 600,
+    # On an expired token, let the widget renew it by making one tiny
+    # authenticated CLI call (claude -p, one turn, a few dozen tokens). This
+    # is the only thing that renews the token when you do not use the CLI
+    # yourself; off means the widget can only warn.
+    "auth_refresh_via_cli": True,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"

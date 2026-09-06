@@ -656,40 +656,63 @@ def _ssl_context() -> ssl.SSLContext:
 
 # Throttle for the refresh subprocess. A revoked or logged-out session 401s
 # forever; without this the widget would spawn a CLI process on every poll.
-_REFRESH_MIN_INTERVAL = 300.0
+_REFRESH_MIN_INTERVAL = 900.0     # it costs a few dozen tokens when it fires
 _last_refresh_attempt = 0.0
+_auth_refresh_enabled = True      # set from config by the app
 
 
-def _refresh_credentials_via_cli(timeout: float = 30.0) -> bool:
-    """Ask the official CLI to renew the stored OAuth token. Returns True if
-    the refresh command ran successfully.
+def set_auth_refresh_enabled(enabled: bool) -> None:
+    global _auth_refresh_enabled
+    _auth_refresh_enabled = bool(enabled)
 
-    We deliberately do NOT reimplement the OAuth refresh here. Doing so would
-    mean hardcoding Anthropic's token endpoint and public client id and then
-    keeping them correct forever -- a maintenance trap, and one that breaks
-    silently and looks exactly like an auth bug when it does. ``claude auth
-    status`` is a supported, non-interactive, zero-token command that
-    validates the session, which makes the CLI renew the access token from the
-    refresh token it already holds and write it back to the very Keychain item
-    this module reads. Delegating to the vendor's own client keeps us correct
-    across any future change to their OAuth.
+
+def _find_claude() -> str | None:
+    """Locate the claude CLI. shutil.which alone is not enough: under
+    launchd PATH is /usr/bin:/bin:/usr/sbin:/sbin, so ~/.local/bin is
+    invisible and the refresh silently never ran."""
+    import os
+    import shutil
+    exe = shutil.which("claude")
+    if exe:
+        return exe
+    for cand in (os.path.expanduser("~/.local/bin/claude"),
+                 "/opt/homebrew/bin/claude", "/usr/local/bin/claude"):
+        if os.access(cand, os.X_OK):
+            return cand
+    return None
+
+
+def _refresh_credentials_via_cli(timeout: float = 90.0) -> bool:
+    """Make the official CLI renew the stored OAuth token. True if it ran.
+
+    Proven on device: ``claude auth status`` re-saves the credentials blob
+    WITHOUT renewing the access token, but any real authenticated call
+    renews it from the refresh token and writes it back to the same
+    Keychain item this module reads. So this runs a one-turn ``claude -p``
+    -- a few dozen tokens -- which is the only automatic renewal available
+    when the user works in the desktop app and never runs the CLI. If the
+    refresh token itself has expired the call 401s, costs nothing, and the
+    caller surfaces DISCONNECTED with the fix.
+
+    We still do not reimplement OAuth here: that would mean hardcoding the
+    token endpoint and client id and keeping them right forever.
     """
     global _last_refresh_attempt
+    if not _auth_refresh_enabled:
+        return False
     now = time.time()
     if now - _last_refresh_attempt < _REFRESH_MIN_INTERVAL:
         return False
     _last_refresh_attempt = now
-
-    import shutil
     import subprocess
-    exe = shutil.which("claude")
+    exe = _find_claude()
     if not exe:
         return False
     try:
         proc = subprocess.run(
-            [exe, "auth", "status"],
+            [exe, "-p", "Reply with exactly: ok", "--max-turns", "1"],
             capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL,   # never let it block on a prompt
+            stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
         return False
