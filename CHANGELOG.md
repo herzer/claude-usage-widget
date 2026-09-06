@@ -3,6 +3,11 @@
 All notable changes to this project are documented here.
 This project follows [semantic versioning](https://semver.org/).
 
+## 0.14.1 — a long rate limit no longer blinds it, and polls are logged
+
+- **The honoured `Retry-After` is capped** (`retry_after_cap_seconds`, default 900). Honouring it in full fixed a self-sustaining lockout, but a 3600 s penalty then set the poll timer to a full hour, so the widget sat idle long after the limit had cleared. It now probes again at the cap; if still throttled, the fresh value applies.
+- **One log line per poll** — time, `ok` or the error, the values, `retry_after`, and when the next poll is due. Without it, "no fresh sample" was indistinguishable from "not polling at all", and diagnosing that cost requests against the very endpoint that was throttling us.
+
 ## 0.14.0 — an app icon, and a proper launcher
 
 - **An app icon**: one progress ring sweeping through the three dial hues — blue for the 5-hour window, green for all models, violet for the model-scoped cap. Drawn natively at every size by `tools/make-icon.py`, so it stays legible at 16 px, and built into a macOS `.icns`.

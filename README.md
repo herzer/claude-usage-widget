@@ -82,6 +82,7 @@ In the panel: **Week / Month** switches the activity grid; the **Light / Dark** 
 | `strip_hover_solid` | `true` | Background lifts to solid while the pointer is over the strip, so the handles are always usable |
 | `strip_handles_mirrored` | *(from the corner preset)* | Which end the scale grip sits on; never changes on its own |
 | `macos_dock_icon` | `false` | Give the widget a Dock icon and an app-switcher entry |
+| `retry_after_cap_seconds` | `900` | Ceiling on an honored `Retry-After`, so a long penalty is not an hour of blindness |
 
 ## When it cannot reach the API
 
