@@ -137,6 +137,9 @@ DEFAULT_CONFIG: Config = {
     "strip_contrast_dark": 50,         # 0..100; 50 = the design's default look
     "strip_contrast_light": 50,
     "strip_hover_solid": True,
+    # Which end the strip's scale grip sits on. Stored so dragging the strip
+    # never swaps the handles; a corner preset is the only thing that sets it.
+    "strip_handles_mirrored": None,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"

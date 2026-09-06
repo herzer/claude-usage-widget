@@ -218,6 +218,8 @@ class UsageOverlay(QWidget):
     scaledTo = Signal(float)
     # Strip view: user-chosen width (0 = fit content); persisted like the scale.
     stripWidthChanged = Signal(int)
+    # Which end the scale grip sits on; persisted so it never flips itself.
+    stripMirrorChanged = Signal(bool)
     # Emitted when the minimized state flips — controller persists it.
     minimizedChanged = Signal(bool)
 
@@ -253,6 +255,13 @@ class UsageOverlay(QWidget):
         # off and the strip was what the user was looking at.
         from claude_usage.menubar import DIAL_CONFIG_KEYS as _DCK
         self._dial_visible = {k: bool(cfg.get(v, True)) for k, v in _DCK.items()}
+        # Which end the scale grip lives on. Stored, not derived: see
+        # _strip_mirrored. Seeded from the position preset so a right-hand
+        # corner gets the grip on the free (left) side.
+        mirror = cfg.get("strip_handles_mirrored")
+        if mirror is None:
+            mirror = str(cfg.get("osd_position", "")) in ("top-right", "bottom-right")
+        self._strip_mirror: bool = bool(mirror)
         # Strip appearance (see DEFAULT_CONFIG). Kept per appearance so a
         # value tuned for a dark desktop does not wreck the light one.
         self._strip_style = {
@@ -552,6 +561,15 @@ class UsageOverlay(QWidget):
         super().showEvent(event)
         self._apply_menubar_level()
 
+    def _set_strip_mirror(self, mirrored: bool) -> None:
+        if bool(mirrored) == self._strip_mirror:
+            return
+        self._strip_mirror = bool(mirrored)
+        self.stripMirrorChanged.emit(self._strip_mirror)
+        if self._view_mode == VIEW_MODE_STRIP and not self._minimized:
+            self._apply_size()
+        self.update()
+
     def set_dial_visible(self, kind: str, visible: bool) -> None:
         """Show or hide one dial in the strip (same toggles as the tray)."""
         if kind not in self._dial_visible:
@@ -613,19 +631,17 @@ class UsageOverlay(QWidget):
         return "!" if L.state == DISCONNECTED else age_short(L.age_s)
 
     def _strip_mirrored(self) -> bool:
-        """True when the strip is anchored at its RIGHT edge.
+        """True when the scale grip sits at the bottom-LEFT and the move
+        handle at the right end; False for the mirror image.
 
-        Then the free corner is bottom-LEFT, so that is where the scale grip
-        lives and the move handle goes to the right end. A window's resize
-        grip is always the corner opposite the fixed one; putting it on the
-        pinned edge is why the pointer could never stay on it.
+        This is a STORED preference, never derived from where the window
+        happens to be. It used to be recomputed from which half of the
+        screen the strip sat on, so simply dragging it across the middle
+        swapped the two handles -- the layout flipping under the user's
+        hand. It now changes only when the user picks a corner preset,
+        which is a deliberate act.
         """
-        if self._position in (OSD_POSITION_TOP_RIGHT, OSD_POSITION_BOTTOM_RIGHT):
-            return True
-        if self._position in (OSD_POSITION_TOP_LEFT, OSD_POSITION_BOTTOM_LEFT):
-            return False
-        scr = QApplication.primaryScreen()
-        return bool(scr) and self.frameGeometry().center().x() > scr.geometry().center().x()
+        return self._strip_mirror
 
     def _strip_layout(self, width: int | None = None):
         """Every position in the strip for a given width, plus min/actual width.
@@ -979,10 +995,18 @@ class UsageOverlay(QWidget):
         self.move(x, y)
 
     def set_position(self, position: str) -> None:
-        """Switch to a named anchor preset and reposition immediately."""
+        """Switch to a named anchor preset and reposition immediately.
+
+        Choosing a left or right corner also decides which end the scale
+        grip sits on -- the only thing that may flip the handles, because
+        the user asked for it."""
         if position not in OSD_POSITIONS:
             return
         self._position = position
+        if position in (OSD_POSITION_TOP_RIGHT, OSD_POSITION_BOTTOM_RIGHT):
+            self._set_strip_mirror(True)
+        elif position in (OSD_POSITION_TOP_LEFT, OSD_POSITION_BOTTOM_LEFT):
+            self._set_strip_mirror(False)
         self._move_to_default_position()
 
     def position(self) -> str:

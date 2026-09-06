@@ -52,7 +52,7 @@ Put `.venv/bin/claude-usage` on your `PATH` (a symlink into `~/.local/bin` works
 | Scroll over it | Scale in steps |
 | Right-click | Menu: view (Bars / Gauge / Strip), position, opacity, theme, *Strip in menu bar*, always on top, **restart**, quit |
 
-In the panel: **Week / Month** switches the activity grid; the **Light / Dark** button restyles the panel *and* the strip; the checkboxes at the bottom choose which dials the optional menu-bar tray icon shows. **Strip appearance** at the bottom tunes background opacity and contrast for the appearance the panel is showing — click ± (hold to repeat) or scroll over the value. Transparency is off unless you turn it on, and it only ever affects the background and border.
+In the panel: **Week / Month** switches the activity grid; the **Light / Dark** button restyles the panel *and* the strip; the checkboxes at the bottom choose which dials to **show** — in the strip and in the optional tray icon alike. **Strip appearance** at the bottom tunes background opacity and contrast for the appearance the panel is showing — click ± (hold to repeat) or scroll over the value. Transparency is off unless you turn it on, and it only ever affects the background and border.
 
 ## Configuration
 

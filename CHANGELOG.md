@@ -3,6 +3,11 @@
 All notable changes to this project are documented here.
 This project follows [semantic versioning](https://semver.org/).
 
+## 0.13.5 — the toggles work, and the handles stop flipping
+
+- **The dial checkboxes control the strip**, not only the tray icon. With the tray off they had no visible effect at all, and the row was labelled "Menu bar" while the strip ignored it. It now reads "Show dials" and governs both surfaces; the last visible dial cannot be switched off.
+- **The handles no longer flip.** Which end the scale grip sits on was recomputed from which half of the screen the strip was on, so dragging it across the middle swapped the grip and the move dots. It is now a stored preference, changed only by picking a corner preset.
+
 ## 0.13.4 — a real check mark, and the app is called Claude Usage
 
 - **Checkboxes draw an actual tick.** Qt cannot put a glyph in `QCheckBox::indicator` without shipping an image, so the styled indicator was only ever a coloured block that read as a swatch. The panel now uses a painted checkbox whose tick colour is chosen by luminance, so it stays legible on green, blue or violet.

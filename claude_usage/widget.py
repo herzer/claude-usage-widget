@@ -1143,6 +1143,7 @@ class ClaudeUsageApp(QObject):
         self.overlay.movedTo.connect(self._on_overlay_moved)
         self.overlay.scaledTo.connect(self._on_overlay_scaled)
         self.overlay.stripWidthChanged.connect(self._on_strip_width_changed)
+        self.overlay.stripMirrorChanged.connect(self._on_strip_mirror_changed)
         self.overlay.minimizedChanged.connect(self._on_overlay_minimized_changed)
         self.stats_ready.connect(self._apply_stats)
         self.update_available.connect(self._on_update_available)
@@ -1812,6 +1813,10 @@ class ClaudeUsageApp(QObject):
             self.notifier.notify_link(link, float(self.config.get("notify_stale_after_seconds", 600) or 600))
         except Exception:
             pass
+
+    def _on_strip_mirror_changed(self, mirrored: bool) -> None:
+        self.config["strip_handles_mirrored"] = bool(mirrored)
+        self._persist_config()
 
     def _on_strip_width_changed(self, width: int) -> None:
         self.config["osd_strip_width"] = int(width)
